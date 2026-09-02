@@ -17,14 +17,48 @@ env:
   PAGES_URL: https://ericgullickson.github.io/fbtech-nos
 
 jobs:
-  # Decides which packages the build job's matrix should cover. On
-  # workflow_dispatch we always build every package. On push, we only
-  # rebuild packages whose overlay/<package>/ directory actually changed,
-  # so e.g. a docs-only or workflow-only push doesn't needlessly republish
-  # every package (dpkg-deb builds are not reproducible, so a no-op
-  # rebuild would otherwise just add pool churn -- see the version-skip
-  # logic in the publish job below).
+  # Auto-discovers the build matrix from overlay/*/build.sh, so adding a new
+  # package only requires adding its directory -- no workflow edit needed.
+  # Emits a JSON array of {name, image} objects: image is the contents of
+  # overlay/<package>/image if present (a single line, e.g.
+  # ghcr.io/ericgullickson/fbtech-nos-build:trixie for heavier packages that
+  # need a fuller toolchain), otherwise it defaults to debian:trixie.
+  discover:
+    runs-on: ubuntu-24.04
+    outputs:
+      packages: ${{ steps.discover.outputs.packages }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Discover overlay packages
+        id: discover
+        run: |
+          set -euo pipefail
+          packages="[]"
+          for build_script in overlay/*/build.sh; do
+            [ -e "${build_script}" ] || continue
+            pkg="$(basename "$(dirname "${build_script}")")"
+            image="debian:trixie"
+            if [ -s "overlay/${pkg}/image" ]; then
+              image="$(tr -d '[:space:]' < "overlay/${pkg}/image")"
+            fi
+            entry=$(jq -nc --arg name "${pkg}" --arg image "${image}" '{name: $name, image: $image}')
+            packages=$(echo "${packages}" | jq -c --argjson e "${entry}" '. + [$e]')
+          done
+          echo "Discovered packages:"
+          echo "${packages}" | jq .
+          echo "packages=${packages}" >> "$GITHUB_OUTPUT"
+
+  # Decides which of the discovered packages the build job's matrix should
+  # cover. On workflow_dispatch we always build every discovered package. On
+  # push, we only rebuild packages whose overlay/<package>/ directory
+  # actually changed, so e.g. a docs-only or workflow-only push doesn't
+  # needlessly republish every package (dpkg-deb builds are not
+  # reproducible, so a no-op rebuild would otherwise just add pool churn --
+  # see the version-skip logic in the publish job below).
   changes:
+    needs: discover
     runs-on: ubuntu-24.04
     outputs:
       packages: ${{ steps.set.outputs.packages }}
@@ -36,13 +70,14 @@ jobs:
 
       - name: Determine which packages changed
         id: set
+        env:
+          DISCOVERED: ${{ needs.discover.outputs.packages }}
         run: |
           set -euo pipefail
-          all_packages='["unionfs-fuse","ipaddrcheck","vyatta-biosdevname","hvinfo"]'
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "Manual run: building every package."
-            echo "packages=${all_packages}" >> "$GITHUB_OUTPUT"
+            echo "Manual run: building every discovered package."
+            echo "packages=${DISCOVERED}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -50,8 +85,8 @@ jobs:
           after="${{ github.sha }}"
           if [ -z "${before}" ] || [ "${before}" = "0000000000000000000000000000000000000000" ] \
              || ! git cat-file -e "${before}" 2>/dev/null; then
-            echo "No usable previous commit to diff against: building every package."
-            echo "packages=${all_packages}" >> "$GITHUB_OUTPUT"
+            echo "No usable previous commit to diff against: building every discovered package."
+            echo "packages=${DISCOVERED}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -66,8 +101,10 @@ jobs:
 
           echo "Changed packages:"
           echo "${changed}"
-          pkgs=$(printf '%s\n' "${changed}" | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          echo "packages=${pkgs}" >> "$GITHUB_OUTPUT"
+          changed_json=$(printf '%s\n' "${changed}" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          filtered=$(echo "${DISCOVERED}" | jq -c --argjson changed "${changed_json}" \
+            '[.[] | select(.name as $n | $changed | index($n))]')
+          echo "packages=${filtered}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: changes
@@ -75,12 +112,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: ${{ fromJson(needs.changes.outputs.packages) }}
+        include: ${{ fromJson(needs.changes.outputs.packages) }}
     runs-on: ubuntu-24.04
     container:
-      image: debian:trixie
+      image: ${{ matrix.image }}
     steps:
-      - name: Install git (bare debian:trixie has none)
+      - name: Install git (bare images may have none)
         run: |
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates
@@ -88,16 +125,63 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Build ${{ matrix.package }}
+      # Optional overlay/<package>/deps: one dependency package name per
+      # line, whose freshly built .deb must be installed before this
+      # package builds (e.g. a future vyos-1x depending on libvyosconfig0
+      # built by vyos1x-config). We first try this run's own build
+      # artifact for that dependency (in case its matrix leg happened to
+      # finish first -- matrix legs run in parallel, so this is opportunistic,
+      # not guaranteed); if it isn't available yet we fall back to installing
+      # the dependency from the already-published apt repository. See
+      # docs/PACKAGES.md.
+      - name: Download any already-built dependency artifacts from this run
+        if: hashFiles(format('overlay/{0}/deps', matrix.name)) != ''
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: 'debs-*'
+          path: /tmp/run-artifacts
+          merge-multiple: true
+          if-no-artifact-found: ignore
+
+      - name: Install declared dependencies (overlay/<package>/deps)
+        if: hashFiles(format('overlay/{0}/deps', matrix.name)) != ''
+        run: |
+          set -euo pipefail
+          deps_file="overlay/${{ matrix.name }}/deps"
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl gnupg
+
+          while IFS= read -r dep || [ -n "${dep}" ]; do
+            dep="$(echo "${dep}" | xargs)"
+            [ -z "${dep}" ] && continue
+            echo "::group::Resolving dependency: ${dep}"
+            found=$(ls /tmp/run-artifacts/"${dep}"_*.deb 2>/dev/null || true)
+            if [ -n "${found}" ]; then
+              echo "Installing ${dep} from this run's build artifact."
+              apt-get install -y --no-install-recommends ${found}
+            else
+              echo "No same-run artifact for ${dep} yet; installing from the published apt repository."
+              curl -fsSL "${PAGES_URL}/fbtech-nos-archive-keyring.asc" \
+                -o /usr/share/keyrings/fbtech-nos-archive-keyring.asc
+              echo "deb [signed-by=/usr/share/keyrings/fbtech-nos-archive-keyring.asc] ${PAGES_URL} trixie main" \
+                > /etc/apt/sources.list.d/fbtech-nos.list
+              apt-get update
+              apt-get install -y --no-install-recommends "${dep}"
+            fi
+            echo "::endgroup::"
+          done < "${deps_file}"
+
+      - name: Build ${{ matrix.name }}
         run: |
           set -euo pipefail
           mkdir -p "${GITHUB_WORKSPACE}/out"
-          OUT_DIR="${GITHUB_WORKSPACE}/out" bash "overlay/${{ matrix.package }}/build.sh"
+          OUT_DIR="${GITHUB_WORKSPACE}/out" bash "overlay/${{ matrix.name }}/build.sh"
 
       - name: Upload built packages
         uses: actions/upload-artifact@v7
         with:
-          name: debs-${{ matrix.package }}
+          name: debs-${{ matrix.name }}
           path: out/*.deb
           if-no-files-found: error
           retention-days: 14
