@@ -11,10 +11,27 @@ else in the fork comes straight from Debian trixie.
   clones the pinned upstream ref, builds a real Debian package with `dpkg-buildpackage`,
   and copies the resulting `*.deb` files into `$OUT_DIR`.
 - `.github/workflows/build-packages.yml` runs on `workflow_dispatch` and on pushes to
-  `main`/`ci/packages` that touch `overlay/**` or the workflow itself. It has three jobs:
-  - **build**: a matrix job, one leg per package (`fail-fast: false`), each in a
-    `debian:trixie` container, running that package's `build.sh` and uploading its
-    `*.deb` files as the artifact `debs-<package>`.
+  `main`/`ci/packages` that touch `overlay/**` or the workflow itself. It has five jobs:
+  - **discover**: scans `overlay/*/build.sh` and emits the full list of packages as a
+    JSON array of `{name, image}` objects. `image` is the (trimmed) single-line
+    contents of `overlay/<package>/image` if that file exists, otherwise
+    `debian:trixie`. Adding a package is therefore just adding its directory — nothing
+    in the workflow needs editing.
+  - **changes** (needs `discover`): on `workflow_dispatch` this always selects every
+    discovered package. On `push` it diffs `overlay/` against the previous commit and
+    only selects the discovered packages whose directory actually changed, so e.g. a
+    push that only touches the workflow file or another package doesn't needlessly
+    rebuild and republish everything. If it can't determine a previous commit to diff
+    against (first run on a branch, force-push, etc.) it falls back to building
+    everything.
+  - **build** (needs `changes`, skipped if `changes` selected no packages): a matrix
+    job built from `changes`' `{name, image}` list via `matrix.include`, one leg per
+    selected package (`fail-fast: false`), each running in that package's declared
+    container image (`${{ matrix.image }}`, `debian:trixie` by default), running that
+    package's `build.sh` and uploading its `*.deb` files as the artifact
+    `debs-<package>`. Before building, if `overlay/<package>/deps` exists, its listed
+    dependency packages are installed first — see "Cross-package build dependencies"
+    below.
   - **publish** (needs `build`, `permissions: contents: write`): downloads all
     `debs-*` artifacts, assembles a `reprepro` apt repository for suite `trixie`,
     component `main`, architecture `amd64` (packages built `Architecture: all` are
@@ -23,11 +40,37 @@ else in the fork comes straight from Debian trixie.
     `gh-pages` branch containing `pool/`, `dists/`, the public keyring, `.nojekyll`,
     and `index.html`. Packages published by previous runs are copied forward into the
     new `pool/` before the current run's packages are added, so a package that is
-    temporarily missing from a run's matrix is not dropped from the repository.
+    temporarily missing from a run's matrix is not dropped from the repository. Before
+    including a freshly built `.deb`, it checks whether that exact `Package`/`Version`
+    is already published and skips re-including it if so (with a log line explaining
+    why) — see "Publishing is idempotent" below for why that check exists.
   - **verify** (needs `publish`, runs in `debian:trixie`): polls
     `https://ericgullickson.github.io/fbtech-nos/dists/trixie/InRelease` until GitHub
     Pages serves the new content, configures the repo exactly as an end user would,
     and does `apt-get install` plus a version-check smoke test on the built packages.
+
+### Publishing is idempotent — bump the Debian revision to republish
+
+`dpkg-buildpackage` builds are not byte-reproducible: the resulting `.deb` embeds
+build timestamps even when nothing about the package's inputs changed. That means
+re-running the pipeline without changing anything produces a `.deb` with the same
+`Package`/`Version`/`Architecture` as what's already in the pool, but different file
+content. `reprepro` refuses to overwrite an existing pool file with different content
+under the same name (`... can only be included again, if they are the same`), which
+would otherwise fail the `publish` job on every re-run.
+
+To avoid that, the publish job checks, for each freshly built `.deb`, whether that
+`Package`/`Version`/`Architecture` is already present in the repository (after
+carrying forward the previous publish's pool) and **skips including it** if so,
+logging why. Nothing is lost — the old build stays published — but the new build is
+simply not re-added.
+
+**This means a packaging change is only published if it bumps the Debian revision.**
+If you change a package's `build.sh` (a new patch, a build-dependency fix, a
+`debian/control` tweak, etc.) without also bumping its Debian revision (e.g.
+`3.6-1` -> `3.6-2` for `unionfs-fuse`, or the trailing `-N` most packages' upstream
+`debian/changelog` entries carry), the rebuilt `.deb` will be silently skipped by
+`publish` and the repository will keep serving the old build.
 
 ## Using the repository
 
@@ -50,19 +93,54 @@ secret and a local backup, never in git history.
 1. Create `overlay/<name>/build.sh`. It must:
    - Fail on error (`set -euo pipefail`).
    - Require `OUT_DIR` to be set and write the finished `*.deb` files there.
-   - Install its own build dependencies via `apt-get` (the container starts as a bare
-     `debian:trixie`).
+   - Install its own build dependencies via `apt-get` (the container starts bare —
+     `debian:trixie` by default, or whatever `overlay/<name>/image` names).
    - Clone the upstream source at a pinned tag, branch, or commit — never a moving
      branch like `HEAD` of an unpinned default.
    - If upstream already ships a `debian/` directory, prefer building it mostly as-is;
      only patch what's necessary (see "Depends fix-ups" below). If it doesn't, add a
      minimal one (`debhelper-compat (= 13)` is the simplest starting point).
    - Run `dpkg-buildpackage -us -uc -b` and copy `../*.deb` into `$OUT_DIR`.
-2. Add the package name to the `matrix.package` list in
-   `.github/workflows/build-packages.yml`'s `build` job.
-3. Add it to the `apt-get install` line in the `verify` job if it should be
+2. That's it for the matrix — the `discover` job picks up any `overlay/<name>/`
+   directory that has a `build.sh` automatically. Nothing in the workflow needs
+   editing to add a package.
+3. Optionally add `overlay/<name>/image` (one line, e.g.
+   `ghcr.io/ericgullickson/fbtech-nos-build:trixie`) if the package needs a heavier
+   toolchain than a bare `debian:trixie` (OCaml, a full VyOS build environment, etc.).
+   See "Per-package container image" below.
+4. Optionally add `overlay/<name>/deps` (one dependency package name per line) if the
+   build needs another overlay package's `.deb` installed first. See "Cross-package
+   build dependencies" below.
+5. Add it to the `apt-get install` line in the `verify` job if it should be
    smoke-tested after publish.
-4. Push and watch the run with `gh run watch`.
+6. Push and watch the run with `gh run watch`. A push that only touches
+   `overlay/<name>/` will build just that package; use `workflow_dispatch` (or touch
+   another already-tracked package too) to exercise the full matrix.
+
+### Per-package container image
+
+By default every package builds in a bare `debian:trixie` container. A package can
+instead declare `overlay/<name>/image`, a file containing a single line naming the
+container image to build it in (e.g. a fuller VyOS-style toolchain image for
+OCaml/Ada packages or ones that need `live-build`-style tooling:
+`ghcr.io/ericgullickson/fbtech-nos-build:trixie`, which is public). The `discover` job
+reads this file and threads the image through the matrix as `{name, image}`, so
+`build`'s `container.image` is `${{ matrix.image }}` per leg.
+
+### Cross-package build dependencies
+
+A package can declare `overlay/<name>/deps`: one other overlay package name per line,
+whose freshly built `.deb` must be installed before this package's `build.sh` runs
+(e.g. a future `vyos-1x` depending on `libvyosconfig0` built by `vyos1x-config`).
+Matrix legs run in parallel with no ordering guarantee between them, so this is
+intentionally kept simple rather than trying to schedule builds in dependency order:
+for each declared dependency, the workflow first tries to fetch that dependency's
+`debs-<dep>` artifact from *this same run* (opportunistic — it only helps if that
+leg happened to finish first) and falls back to installing the dependency from the
+**already-published** apt repository if no same-run artifact is available yet. That
+means the very first time a new dependent package is added, its dependency must
+already have a successful publish behind it (or be included in the same run and win
+the race) for the build to succeed; a second run will always find it via either path.
 
 ### Depends fix-ups
 
