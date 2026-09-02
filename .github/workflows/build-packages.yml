@@ -17,15 +17,65 @@ env:
   PAGES_URL: https://ericgullickson.github.io/fbtech-nos
 
 jobs:
+  # Decides which packages the build job's matrix should cover. On
+  # workflow_dispatch we always build every package. On push, we only
+  # rebuild packages whose overlay/<package>/ directory actually changed,
+  # so e.g. a docs-only or workflow-only push doesn't needlessly republish
+  # every package (dpkg-deb builds are not reproducible, so a no-op
+  # rebuild would otherwise just add pool churn -- see the version-skip
+  # logic in the publish job below).
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      packages: ${{ steps.set.outputs.packages }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine which packages changed
+        id: set
+        run: |
+          set -euo pipefail
+          all_packages='["unionfs-fuse","ipaddrcheck","vyatta-biosdevname","hvinfo"]'
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual run: building every package."
+            echo "packages=${all_packages}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          before="${{ github.event.before }}"
+          after="${{ github.sha }}"
+          if [ -z "${before}" ] || [ "${before}" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${before}" 2>/dev/null; then
+            echo "No usable previous commit to diff against: building every package."
+            echo "packages=${all_packages}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed=$(git diff --name-only "${before}" "${after}" -- overlay \
+            | awk -F/ 'NF>1{print $2}' | sort -u)
+
+          if [ -z "${changed}" ]; then
+            echo "No overlay/<package> directories changed."
+            echo "packages=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Changed packages:"
+          echo "${changed}"
+          pkgs=$(printf '%s\n' "${changed}" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "packages=${pkgs}" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: changes
+    if: needs.changes.outputs.packages != '[]'
     strategy:
       fail-fast: false
       matrix:
-        package:
-          - unionfs-fuse
-          - ipaddrcheck
-          - vyatta-biosdevname
-          - hvinfo
+        package: ${{ fromJson(needs.changes.outputs.packages) }}
     runs-on: ubuntu-24.04
     container:
       image: debian:trixie
@@ -129,8 +179,29 @@ jobs:
 
           # Add this run's freshly built packages (skip debug-symbol .debs;
           # they are still available as build artifacts if ever needed).
-          find artifacts -name '*.deb' ! -name '*-dbgsym_*' -print0 \
-            | xargs -0 -n1 reprepro -b repo includedeb trixie
+          #
+          # dpkg-deb builds are not byte-reproducible (embedded timestamps),
+          # so rebuilding a package without bumping its Debian revision
+          # produces a .deb that differs from the one already in the pool
+          # under the exact same filename. reprepro refuses to overwrite an
+          # existing pool file with different content, so we skip
+          # re-including a version that is already published instead of
+          # letting that fail the job. To publish a new build of a package
+          # whose upstream ref did not change, bump the Debian revision in
+          # that package's build.sh (e.g. 3.6-1 -> 3.6-2). See
+          # docs/PACKAGES.md.
+          while IFS= read -r -d '' deb; do
+            pkg=$(dpkg-deb -f "$deb" Package)
+            ver=$(dpkg-deb -f "$deb" Version)
+            arch=$(dpkg-deb -f "$deb" Architecture)
+            existing=$(reprepro -b repo list trixie "$pkg" 2>/dev/null \
+              | grep "|${arch}: " | awk '{print $NF}' || true)
+            if [ "${existing}" = "${ver}" ]; then
+              echo "Skipping ${pkg} ${ver} (${arch}): already published at this version (unchanged Debian revision)."
+            else
+              reprepro -b repo includedeb trixie "$deb"
+            fi
+          done < <(find artifacts -name '*.deb' ! -name '*-dbgsym_*' -print0)
 
           reprepro -b repo export trixie
 

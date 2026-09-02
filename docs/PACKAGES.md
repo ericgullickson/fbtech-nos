@@ -11,10 +11,17 @@ else in the fork comes straight from Debian trixie.
   clones the pinned upstream ref, builds a real Debian package with `dpkg-buildpackage`,
   and copies the resulting `*.deb` files into `$OUT_DIR`.
 - `.github/workflows/build-packages.yml` runs on `workflow_dispatch` and on pushes to
-  `main`/`ci/packages` that touch `overlay/**` or the workflow itself. It has three jobs:
-  - **build**: a matrix job, one leg per package (`fail-fast: false`), each in a
-    `debian:trixie` container, running that package's `build.sh` and uploading its
-    `*.deb` files as the artifact `debs-<package>`.
+  `main`/`ci/packages` that touch `overlay/**` or the workflow itself. It has four jobs:
+  - **changes**: on `workflow_dispatch` this always selects every package. On `push`
+    it diffs `overlay/` against the previous commit and only selects packages whose
+    directory actually changed, so e.g. a push that only touches the workflow file or
+    another package doesn't needlessly rebuild and republish everything. If it can't
+    determine a previous commit to diff against (first run on a branch, force-push,
+    etc.) it falls back to building everything.
+  - **build** (needs `changes`, skipped if `changes` selected no packages): a matrix
+    job, one leg per selected package (`fail-fast: false`), each in a `debian:trixie`
+    container, running that package's `build.sh` and uploading its `*.deb` files as
+    the artifact `debs-<package>`.
   - **publish** (needs `build`, `permissions: contents: write`): downloads all
     `debs-*` artifacts, assembles a `reprepro` apt repository for suite `trixie`,
     component `main`, architecture `amd64` (packages built `Architecture: all` are
@@ -23,11 +30,37 @@ else in the fork comes straight from Debian trixie.
     `gh-pages` branch containing `pool/`, `dists/`, the public keyring, `.nojekyll`,
     and `index.html`. Packages published by previous runs are copied forward into the
     new `pool/` before the current run's packages are added, so a package that is
-    temporarily missing from a run's matrix is not dropped from the repository.
+    temporarily missing from a run's matrix is not dropped from the repository. Before
+    including a freshly built `.deb`, it checks whether that exact `Package`/`Version`
+    is already published and skips re-including it if so (with a log line explaining
+    why) — see "Publishing is idempotent" below for why that check exists.
   - **verify** (needs `publish`, runs in `debian:trixie`): polls
     `https://ericgullickson.github.io/fbtech-nos/dists/trixie/InRelease` until GitHub
     Pages serves the new content, configures the repo exactly as an end user would,
     and does `apt-get install` plus a version-check smoke test on the built packages.
+
+### Publishing is idempotent — bump the Debian revision to republish
+
+`dpkg-buildpackage` builds are not byte-reproducible: the resulting `.deb` embeds
+build timestamps even when nothing about the package's inputs changed. That means
+re-running the pipeline without changing anything produces a `.deb` with the same
+`Package`/`Version`/`Architecture` as what's already in the pool, but different file
+content. `reprepro` refuses to overwrite an existing pool file with different content
+under the same name (`... can only be included again, if they are the same`), which
+would otherwise fail the `publish` job on every re-run.
+
+To avoid that, the publish job checks, for each freshly built `.deb`, whether that
+`Package`/`Version`/`Architecture` is already present in the repository (after
+carrying forward the previous publish's pool) and **skips including it** if so,
+logging why. Nothing is lost — the old build stays published — but the new build is
+simply not re-added.
+
+**This means a packaging change is only published if it bumps the Debian revision.**
+If you change a package's `build.sh` (a new patch, a build-dependency fix, a
+`debian/control` tweak, etc.) without also bumping its Debian revision (e.g.
+`3.6-1` -> `3.6-2` for `unionfs-fuse`, or the trailing `-N` most packages' upstream
+`debian/changelog` entries carry), the rebuilt `.deb` will be silently skipped by
+`publish` and the repository will keep serving the old build.
 
 ## Using the repository
 
@@ -58,11 +91,15 @@ secret and a local backup, never in git history.
      only patch what's necessary (see "Depends fix-ups" below). If it doesn't, add a
      minimal one (`debhelper-compat (= 13)` is the simplest starting point).
    - Run `dpkg-buildpackage -us -uc -b` and copy `../*.deb` into `$OUT_DIR`.
-2. Add the package name to the `matrix.package` list in
-   `.github/workflows/build-packages.yml`'s `build` job.
+2. Add the package name to the `all_packages` JSON list in the `changes` job in
+   `.github/workflows/build-packages.yml` (this is the full package list used for
+   `workflow_dispatch` runs; the `build` job's matrix itself is populated from
+   `changes`' output, not a separate hard-coded list).
 3. Add it to the `apt-get install` line in the `verify` job if it should be
    smoke-tested after publish.
-4. Push and watch the run with `gh run watch`.
+4. Push and watch the run with `gh run watch`. A push that only touches
+   `overlay/<name>/` will build just that package; use `workflow_dispatch` (or touch
+   another already-tracked package too) to exercise the full matrix.
 
 ### Depends fix-ups
 
