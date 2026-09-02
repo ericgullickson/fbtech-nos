@@ -18,9 +18,9 @@
 
 # This Dockerfile is installable on x86-64 (amd64) and aarch64 (amd64) systems
 ARG ARCH=
-FROM ${ARCH}debian:bookworm-slim
+FROM ${ARCH}debian:trixie-slim
 
-RUN grep "VERSION_ID" /etc/os-release || (echo 'VERSION_ID="12"' >> /etc/os-release)
+RUN grep "VERSION_ID" /etc/os-release || (echo 'VERSION_ID="13"' >> /etc/os-release)
 
 # It is also possible to emulate an arm system inside docker,
 # execution of this emulated system needs to be executed on an x86 or x86-64 host.
@@ -29,23 +29,23 @@ RUN grep "VERSION_ID" /etc/os-release || (echo 'VERSION_ID="12"' >> /etc/os-rele
 # Supported architectures:
 #     arm64v8/
 # Example to build natively:
-#     docker build -t vyos-build:rolling .
+#     docker build -t fbtech-nos-build:trixie .
 # Example to build on arm64/aarch64:
-#     docker build -t vyos-build:rolling-arm64 --build-arg ARCH=arm64v8/ .
+#     docker build -t fbtech-nos-build:trixie-arm64 --build-arg ARCH=arm64v8/ .
 
 # On some versions of docker the emulation framework is not installed by default and
 # you need to install qemu, qemu-user-static and register qemu inside docker manually using:
 # `docker run --rm --privileged multiarch/qemu-user-static:register --reset`
-LABEL authors="VyOS Maintainers <maintainers@vyos.io>" \
-      org.opencontainers.image.authors="VyOS Maintainers <maintainers@vyos.io>" \
-      org.opencontainers.image.url="https://github.com/vyos/vyos-build" \
-      org.opencontainers.image.documentation="https://docs.vyos.io/en/latest/contributing/build-vyos.html" \
-      org.opencontainers.image.source="https://github.com/vyos/vyos-build" \
-      org.opencontainers.image.vendor="VyOS Networks" \
-      org.opencontainers.image.licenses="GNU" \
-      org.opencontainers.image.title="vyos-build" \
-      org.opencontainers.image.description="Container to build VyOS ISO" \
-      org.opencontainers.image.base.name="docker.io/debian/debian:bookworm"
+LABEL authors="fbtech-nos contributors" \
+      org.opencontainers.image.authors="fbtech-nos contributors" \
+      org.opencontainers.image.url="https://github.com/ericgullickson/fbtech-nos" \
+      org.opencontainers.image.documentation="https://github.com/ericgullickson/fbtech-nos/blob/main/docs/TRIXIE-BASE.md" \
+      org.opencontainers.image.source="https://github.com/ericgullickson/fbtech-nos" \
+      org.opencontainers.image.vendor="fbtech-nos" \
+      org.opencontainers.image.licenses="GPL-2.0-or-later" \
+      org.opencontainers.image.title="fbtech-nos-build" \
+      org.opencontainers.image.description="Container to build the fbtech-nos ISO (VyOS fork on Debian trixie)" \
+      org.opencontainers.image.base.name="docker.io/debian/debian:trixie"
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN /bin/echo -e 'APT::Install-Recommends "0";\nAPT::Install-Suggests "0";' > /etc/apt/apt.conf.d/01norecommends
@@ -108,7 +108,6 @@ RUN apt-get update && apt-get install -y \
       debootstrap \
       live-build \
       gdisk \
-      sbsigntool \
       dosfstools \
       kpartx \
       xorriso
@@ -170,7 +169,7 @@ RUN apt-get update && apt-get install -y \
 COPY patches/live-build/0001-save-package-info.patch /tmp/0001-save-package-info.patch
 
 RUN git clone https://salsa.debian.org/live-team/live-build.git /tmp/live-build && \
-    cd /tmp/live-build && git checkout debian/1%20240810 && \
+    cd /tmp/live-build && git checkout "debian/1%20250505+deb13u1" && \
     patch -p1 < /tmp/0001-save-package-info.patch && \
     dch -n "Applying fix for save package info" && \
     dpkg-buildpackage -us -uc && \
@@ -186,7 +185,7 @@ RUN git clone https://salsa.debian.org/live-team/live-build.git /tmp/live-build 
 RUN wget https://salsa.debian.org/klausenbusk-guest/debootstrap/commit/a9a603b17cadbf52cb98cde0843dc9f23a08b0da.patch \
       -O /tmp/a9a603b17cadbf52cb98cde0843dc9f23a08b0da.patch && \
     git clone https://salsa.debian.org/installer-team/debootstrap /tmp/debootstrap && \
-    cd /tmp/debootstrap && git checkout 1.0.114 && \
+    cd /tmp/debootstrap && git checkout 1.0.141 && \
     patch -p1 < /tmp/a9a603b17cadbf52cb98cde0843dc9f23a08b0da.patch && \
     dch -n "Applying fix for docker image compile" && \
     dpkg-buildpackage -us -uc && \
@@ -194,12 +193,20 @@ RUN wget https://salsa.debian.org/klausenbusk-guest/debootstrap/commit/a9a603b17
     && rm /tmp/a9a603b17cadbf52cb98cde0843dc9f23a08b0da.patch \
     && rm -rf /tmp/debootstrap
 
-# FPM is used when generation Debian pckages for e.g. Intel QAT drivers
+# FPM is used to generate Debian packages for overlay packages built from
+# upstream tarballs (e.g. unionfs-fuse)
 RUN gem install --no-document fpm
 
-# Add vyos package repo
-COPY vyos-dev.list /etc/apt/sources.list.d/vyos-dev.list
-COPY vyos-dev.key /usr/share/keyrings/vyos-dev-archive-keyring.asc
+# Add the fbtech-nos package repo. The signing keyring is published by the
+# package-build pipeline (a separate workflow/branch) alongside the repo
+# itself, so it may not exist yet when this image is built. Fetch it at
+# image build time and disable the repo entry if it is not yet live, rather
+# than failing the whole container build.
+COPY fbtech-nos.list /etc/apt/sources.list.d/fbtech-nos.list
+RUN curl -sSfL -o /usr/share/keyrings/fbtech-nos-archive-keyring.asc \
+      https://ericgullickson.github.io/fbtech-nos/fbtech-nos-archive-keyring.asc || \
+    { echo "W: fbtech-nos-archive-keyring.asc is not published yet; disabling the fbtech-nos apt repo for this build" >&2; \
+      mv /etc/apt/sources.list.d/fbtech-nos.list /etc/apt/sources.list.d/fbtech-nos.list.disabled; }
 
 # Packages needed for vyos-1x
 RUN pip --no-cache --no-cache-dir install --break-system-packages \
@@ -246,18 +253,10 @@ RUN pip --no-cache --no-cache-dir install --break-system-packages \
       whois \
       python3-cracklib
 
-# Go required for telegraf and prometheus exporters build
-RUN GO_VERSION_INSTALL="1.23.2" ; \
-    wget -O /tmp/go${GO_VERSION_INSTALL}.linux-amd64.tar.gz https://go.dev/dl/go${GO_VERSION_INSTALL}.linux-$(dpkg-architecture -qDEB_HOST_ARCH).tar.gz ; \
-    tar -C /opt -xzf /tmp/go*.tar.gz && \
-    rm /tmp/go*.tar.gz
-RUN echo "export PATH=/opt/go/bin:$PATH" >> /etc/bash.bashrc
-
 # Packages needed for QEMU test-suite
 RUN apt-get update && apt-get install -y \
         python3-pexpect \
-        qemu-utils \
-        qemu-kvm
+        qemu-utils
 
 # Packages for amd64 platforms
 RUN if dpkg-architecture -iamd64; then \
@@ -267,9 +266,10 @@ RUN if dpkg-architecture -iamd64; then \
     fi
 
 # Packages for arm64 platform
+# (Debian merged qemu-system-aarch64 into qemu-system-arm)
 RUN if dpkg-architecture -iarm64; then \
       apt-get update && apt-get install -y \
-        qemu-system-aarch64 \
+        qemu-system-arm \
         qemu-efi-aarch64; \
     fi
 
@@ -282,23 +282,6 @@ RUN if dpkg-architecture -iamd64; then \
       grub2-common; \
     fi
 
-# Packages needed for vyos-cloud-init
-RUN apt-get update && apt-get install -y \
-      python3-configobj \
-      python3-httpretty \
-      python3-jsonpatch \
-      python3-mock \
-      python3-oauthlib \
-      python3-pep8 \
-      python3-pyflakes \
-      python3-serial \
-      python3-unittest2 \
-      python3-yaml \
-      python3-jsonschema \
-      python3-contextlib2 \
-      python3-pytest-cov \
-      cloud-utils
-
 # Install utilities for building grub and u-boot images
 RUN if dpkg-architecture -iarm64; then \
     apt-get update && apt-get install -y \
@@ -306,18 +289,6 @@ RUN if dpkg-architecture -iarm64; then \
       u-boot-tools \
       grub-efi-$(dpkg-architecture -qDEB_HOST_ARCH); \
     fi
-
-# Packages needed for OWAMP/TWAMP (service sla)
-RUN git clone -b 4.4.6 https://github.com/perfsonar/i2util.git /tmp/i2util && \
-      cd /tmp/i2util && \
-      dpkg-buildpackage -uc -us -tc -b && \
-      dpkg -i /tmp/*i2util*_$(dpkg-architecture -qDEB_HOST_ARCH).deb
-
-# Package needed for building Kea
-RUN echo "deb http://deb.debian.org/debian bookworm-backports main" \
-      > /etc/apt/sources.list.d/bookworm-backports.list \
-      && apt-get update \
-      && apt install -y -t bookworm-backports meson
 
 # Creating image for embedded systems needs this utilities to prepare a image file
 RUN apt-get update && apt-get install -y \
@@ -339,9 +310,6 @@ RUN cd /tmp && curl -sSfL -o syft.tar.gz \
 RUN sed "s/^%sudo.*/%sudo\tALL=(ALL) NOPASSWD:ALL/g" -i /etc/sudoers && \
     echo "vyos_bld\tALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
     chmod a+s /usr/sbin/useradd /usr/sbin/groupadd
-
-# Ensure all users have access to Go
-RUN echo "export PATH=/opt/go/bin:\$PATH" >> /etc/skel/.bashrc
 
 # Raise upper limit for UID when working in an Active Directory integrated
 # environment. This solves the warning: vyos_bld's uid 1632000007 outside of the

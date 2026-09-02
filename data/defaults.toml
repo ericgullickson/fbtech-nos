@@ -2,26 +2,31 @@ build_type = "development"
 
 architecture = "amd64"
 
-debian_distribution = "bookworm"
+debian_distribution = "trixie"
 
 debian_mirror = "http://deb.debian.org/debian"
 debian_security_mirror = "http://deb.debian.org/debian-security"
 
 debian_archive_areas = "main contrib non-free non-free-firmware"
 
-vyos_mirror = "https://packages.vyos.net/repositories/rolling"
+vyos_mirror = "https://ericgullickson.github.io/fbtech-nos"
 
-vyos_branch = "rolling"
-release_train = "rolling"
+vyos_branch = "fbtech"
+release_train = "fbtech"
 
-kernel_version = "6.18.48"
-kernel_flavor = "vyos"
+# Debian's stock kernel, not a self-built one. "amd64" is the live-build
+# flavour name for the linux-image-amd64 metapackage; the actual kernel
+# ABI/version is whatever trixie-backports currently ships (see
+# data/live-build-config/archives/trixie-backports.pref.chroot) and is
+# discovered at build time from /boot/vmlinuz-* inside the chroot, not
+# pinned here. See docs/TRIXIE-BASE.md.
+kernel_flavor = "amd64"
 bootloaders = "syslinux,grub-efi"
 
 squashfs_compression_type = "xz -Xbcj x86 -b 256k -always-use-fragments -no-recovery"
 
-website_url = "https://vyos.io"
-support_url = "https://support.vyos.io"
-bugtracker_url = "https://vyos.dev"
-documentation_url = "https://docs.vyos.io/en/latest"
-project_news_url = "https://blog.vyos.io"
+website_url = "https://github.com/ericgullickson/fbtech-nos"
+support_url = "https://github.com/ericgullickson/fbtech-nos/issues"
+bugtracker_url = "https://github.com/ericgullickson/fbtech-nos/issues"
+documentation_url = "https://github.com/ericgullickson/fbtech-nos/blob/main/README.md"
+project_news_url = "https://github.com/ericgullickson/fbtech-nos/releases"

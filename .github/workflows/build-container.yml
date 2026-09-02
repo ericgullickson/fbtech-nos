@@ -1,0 +1,69 @@
+name: Build fbtech-nos build container
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - trixie-base
+    paths:
+      - 'docker/**'
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/fbtech-nos-build
+  IMAGE_TAG: trixie
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          file: docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attempt to make the package public
+        # The GITHUB_TOKEN's packages:write scope is generally not enough to
+        # change a personal (non-org) package's visibility - that needs a
+        # PAT with admin:packages / delete:packages scopes belonging to the
+        # package owner. Try anyway and note the outcome; this step is not
+        # allowed to fail the build.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Attempting to set fbtech-nos-build package visibility to public..."
+          if gh api --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            "/user/packages/container/fbtech-nos-build/visibility" \
+            -f visibility=public; then
+            echo "Package visibility set to public."
+          else
+            echo "::warning::Could not set package visibility via the API with GITHUB_TOKEN (expected - this endpoint needs a personal access token with admin:packages/delete:packages scope belonging to the package owner). Set it manually once: https://github.com/users/${{ github.repository_owner }}/packages/container/fbtech-nos-build/settings"
+          fi

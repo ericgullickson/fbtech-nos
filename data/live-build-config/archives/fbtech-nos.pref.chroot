@@ -1,0 +1,3 @@
+Package: *
+Pin: release n=fbtech
+Pin-Priority: 999

@@ -1,9 +1,0 @@
-[[packages]]
-name = "libnss-mapuser"
-commit_id = "rolling"
-scm_url = "https://github.com/vyos/libnss-mapuser.git"
-
-[dependencies]
-packages = [
-    "libaudit-dev"
-]

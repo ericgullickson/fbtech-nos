@@ -1,0 +1,11 @@
+Package: linux-image-amd64
+Pin: release n=trixie-backports
+Pin-Priority: 600
+
+Package: kea*
+Pin: release n=trixie-backports
+Pin-Priority: 600
+
+Package: *
+Pin: release n=trixie-backports
+Pin-Priority: -100

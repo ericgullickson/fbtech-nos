@@ -55,7 +55,7 @@ def supplier_from_contact_string(raw):
         return {'contact': [{'email': raw.strip()}]}
     return {'name': raw.strip()}
 
-def component_supplier(comp, vyos_supplier, go_authors_supplier):
+def component_supplier(comp, vyos_supplier, go_authors_supplier, debian_supplier):
     # Return the supplier field for CycloneDX components.
 
     # Debian packages: the Maintainer field (component.publisher) is a real,
@@ -64,13 +64,14 @@ def component_supplier(comp, vyos_supplier, go_authors_supplier):
     if supplier:
         return supplier
 
-    # Kernel modules: VyOS compiles every one itself for this exact kernel
-    # build, so VyOS genuinely is the supplier of the binary - regardless of
-    # who originally authored the driver source.
+    # Kernel modules: on fbtech-nos the kernel is Debian's stock
+    # linux-image-amd64, not a VyOS/fbtech-nos self-build, so Debian is the
+    # genuine supplier of the binary here (unlike upstream VyOS, which
+    # compiles every module itself for its own kernel build).
     found_by = next((p['value'] for p in comp.get('properties', [])
                       if p.get('name') == 'syft:package:foundBy'), None)
     if found_by == 'linux-kernel-cataloger':
-        return vyos_supplier
+        return debian_supplier
 
     # Python packages: component.author (from the package's own METADATA) is
     # a real, per-package supplier fact. We install these packages unmodified.
@@ -419,10 +420,10 @@ def build():
     shutil.copytree("data/live-build-config/", lb_config_dir)
     os.makedirs(lb_config_dir, exist_ok=True)
 
-    ## Secure Boot - Copy public Keys to image
-    sb_certs = 'data/certificates'
-    if os.path.isdir(sb_certs):
-        shutil.copytree(sb_certs, f'{lb_config_dir}/includes.chroot/var/lib/shim-signed/mok')
+    # Note: VyOS's Secure Boot shim/MOK enrollment (data/certificates,
+    # var/lib/shim-signed/mok) is dropped on fbtech-nos. Debian's own
+    # signed shim, grub and kernel are used as-is; see the removed
+    # 93-sb-sign-kernel.chroot hook and docs/TRIXIE-BASE.md.
 
     # Switch to the build directory, this is crucial for the live-build work
     # because the effective build config files etc. are there.
@@ -733,7 +734,7 @@ menu clear
                 --checksums "sha256" \
                 --chroot-squashfs-compression-type "{{squashfs_compression_type}}" \
                 --debian-installer none \
-                --debootstrap-options "--variant=minbase --exclude=isc-dhcp-client,isc-dhcp-common,ifupdown --include=apt-utils,ca-certificates,gnupg2,linux-kbuild-6.1" \
+                --debootstrap-options "--variant=minbase --exclude=isc-dhcp-client,isc-dhcp-common,ifupdown --include=apt-utils,ca-certificates,gnupg2" \
                 --distribution "{{debian_distribution}}" \
                 --firmware-binary false \
                 --firmware-chroot false \
@@ -741,7 +742,7 @@ menu clear
                 --iso-publisher "{{build_by}}" \
                 --iso-volume "VyOS" \
                 --linux-flavours "{{kernel_flavor}}" \
-                --linux-packages "linux-image-{{kernel_version}}" \
+                --linux-packages "linux-image" \
                 --mirror-binary "{{debian_mirror}}" \
                 --mirror-binary-security "{{debian_security_mirror}}" \
                 --mirror-bootstrap "{{debian_mirror}}" \
@@ -862,6 +863,7 @@ Pin-Priority: 600
             vyos_author = {'name': 'VyOS maintainers and contributors', 'email': 'maintainers@vyos.io'}
             vyos_supplier = {'name': 'VyOS Networks', 'url': [build_defaults['website_url']]}
             go_authors_supplier = {'name': 'The Go Authors', 'url': ['https://go.dev']}
+            debian_supplier = {'name': 'Debian', 'url': ['https://www.debian.org']}
 
             cdx['metadata']['authors'] = [vyos_author]
             cdx['metadata']['supplier'] = vyos_supplier
@@ -874,7 +876,7 @@ Pin-Priority: 600
 
             # Add the correct component.supplier field.
             for comp in cdx['components']:
-                supplier = component_supplier(comp, vyos_supplier, go_authors_supplier)
+                supplier = component_supplier(comp, vyos_supplier, go_authors_supplier, debian_supplier)
                 if supplier:
                     comp['supplier'] = supplier
 
