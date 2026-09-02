@@ -308,15 +308,22 @@ lines matching common apt/dependency failure patterns.
   `gh api -X PATCH .../visibility` step got a `404` as anticipated
   (`GITHUB_TOKEN` cannot administer package visibility) - harmless since
   the package was already public.
-- `trixie-iso-dryrun.yml` run:
+- `trixie-iso-dryrun.yml` run 1 (before the `vyos_branch` fix):
   https://github.com/ericgullickson/fbtech-nos/actions/runs/33653090330
   (triggered via a temporary `push` trigger, since GitHub will not let a
   `workflow_dispatch`-only workflow be dispatched via API/CLI until it
   exists on the default branch - reverted to `workflow_dispatch`-only
-  immediately after this run; see the two `ci:`/`test:` commits around it
-  in the branch history). See "Where the trixie ISO dry-run stopped"
-  below for the result - it failed immediately, before live-build ever
-  started, on a real bug this milestone's config changes introduced.
+  immediately after this run, then dispatched normally for run 2 below
+  once the workflow was registered). Failed immediately at vyos-1x
+  checkout - see "Where the trixie ISO dry-run stopped".
+- `trixie-iso-dryrun.yml` run 2 (after the fix, component forks, and
+  published apt repo all existed):
+  https://github.com/ericgullickson/fbtech-nos/actions/runs/33665322607.
+  Confirmed the `vyos_branch` fix works (no checkout failure this time)
+  and that debootstrap + Debian package installation via live-build both
+  complete successfully on trixie; failed later, fetching the overlay
+  repo's Release file - see "Where the trixie ISO dry-run stopped" for
+  the full analysis.
 - The `live-build`/`debootstrap` source patches used in `docker/Dockerfile`
   were confirmed (via `patch --dry-run`) to still apply cleanly to the
   exact tags trixie ships (`debian/1%20250505+deb13u1`,
@@ -347,79 +354,117 @@ lines matching common apt/dependency failure patterns.
 
 ## Where the trixie ISO dry-run stopped, and why
 
-**It stopped immediately, before live-build (or even `lb config`) ever ran,
-with:**
+Two runs so far, in order:
+
+### Run 1 (before the `vyos_branch` fix): failed at vyos-1x checkout
 
 ```
 E: Could not retrieve vyos-1x from branch fbtech: GitCommandError(['git', 'checkout', 'fbtech'], 1, b"error: pathspec 'fbtech' did not match any file(s) known to git", b'')
 ```
 
-(full log: `trixie-dryrun-log` artifact on
-https://github.com/ericgullickson/fbtech-nos/actions/runs/33653090330).
+Run: https://github.com/ericgullickson/fbtech-nos/actions/runs/33653090330.
+Stopped immediately, before live-build (or even `lb config`) ever ran. Root
+cause and fix: see "Fixing the `vyos_branch` conflation" above - `vyos-1x`
+was still unforked upstream at that point (no `fbtech` branch existed).
 
-This is earlier, and a different failure, than the milestone brief
-anticipated ("expected to fail once live-build tries to install vyos-1x
-against trixie"). The cause is a real bug this milestone's
-`data/defaults.toml` change introduced:
+### Run 2 (after the fix, and after the component forks/apt repo existed): failed fetching the overlay repo's Release file
 
-`build-vyos-image` uses `vyos_branch` for two unrelated things that happen
-to share one name in upstream VyOS but not in this fork:
+```
+Ign:37 https://packages.vyos.net/repositories/rolling trixie InRelease
+Err:38 https://packages.vyos.net/repositories/rolling trixie Release
+  404  Not Found [IP: 172.67.73.83 443]
+...
+E: The repository 'https://packages.vyos.net/repositories/rolling trixie Release' does not have a Release file.
+...
+E: An unexpected failure occurred, exiting...
+```
 
-1. The apt suite/distribution component of the overlay repo line it
-   generates (`deb {vyos_mirror} {vyos_branch} main`).
-2. The git branch of `vyos-1x` it clones and checks out at the very start
-   of the build, purely to add `vyos-1x/python` to `sys.path` so
-   `build-vyos-image` can import a couple of helper modules from it
-   (`build()` in `scripts/image-build/build-vyos-image`, well before `lb
-   config` is ever invoked).
+which surfaces up through `build-vyos-image` as:
 
-This milestone set `vyos_branch = "fbtech"` for reason (1) (see
-`docs/FORK-PLAN.md`'s milestone-3 description), but `vyos-1x` itself is
-still unforked upstream `vyos/vyos-1x` until milestone 4 - it has no
-`fbtech` branch, only `rolling`/`sagitta`/`circinus`/etc. - so step (2)
-fails immediately and the whole build aborts before touching Debian, apt,
-or live-build at all.
+```
+Traceback (most recent call last):
+  File ".../build-vyos-image", line 994, in <module>
+    build()
+  File ".../build-vyos-image", line 818, in build
+    cmd("lb build 2>&1")
+  File ".../scripts/image-build/utils.py", line 89, in cmd
+    raise OSError(f"Command '{command}' failed")
+OSError: Command 'lb build 2>&1' failed
+```
 
-**What this means for milestone 4:** once `vyos-1x` is forked to
-`ericgullickson/fbtech-nos-1x` (or whatever name is chosen), either that
-fork needs a branch literally named `fbtech` (matching `vyos_branch`), or
-`VYOS1X_REPO_URL` needs to point at it with `git.Repo.clone_from(...);
-checkout(branch_name)` given a branch that exists, or `build-vyos-image`
-needs to stop conflating the apt suite name with the vyos-1x git branch
-(e.g. a separate `vyos_1x_git_branch` config key). Whichever fix is
-chosen, it has to land before any further dry-run can get past this point.
+Run: https://github.com/ericgullickson/fbtech-nos/actions/runs/33665322607
+(`trixie-dryrun-log` artifact has the full ~1200-line log).
 
-**Follow-up run to actually exercise the Debian/live-build side:** to get
-the signal the milestone brief was after (how far live-build gets
-resolving `vyos-1x`'s dependencies against trixie), a second, purely
-exploratory run was attempted with `vyos_branch`/`release_train`
-temporarily set to `"rolling"` (an actual `vyos-1x` branch, and the real
-suite name on the `--vyos-mirror` the dry-run command points at). That
-change could not be committed/pushed in this session because of a local
-git-commit-signing outage (the 1Password SSH-signing agent used for
-commit signing on this machine stopped responding partway through this
-milestone and did not recover before the session ended - see the final
-report), so **that follow-up run did not happen**. It is a good next step
-for whoever picks this up: temporarily set `vyos_branch =
-"rolling"`/`release_train = "rolling"`, dispatch
-`trixie-iso-dryrun.yml`, capture how far `lb build` gets against `vyos-1x`
-on trixie, then revert.
+**This got much further than run 1**: `lb build` ran debootstrap for the
+trixie base and successfully installed the full `vyos-base`/`vyos-utils`
+package lists plus everything `apt-get`-installable from `debian_mirror`
+(trixie main/contrib/non-free/non-free-firmware) and `trixie-backports`
+(confirmed dozens of `Get:`/`I: Configuring ...` lines for ordinary
+Debian packages completing normally). It stopped when live-build's chroot
+apt update reached the *overlay* package repository entry.
+
+**Root cause: the dry-run command's `--vyos-mirror` doesn't serve the
+suite our config now asks for.** The milestone brief's dry-run command is
+fixed as `--vyos-mirror https://packages.vyos.net/repositories/rolling/`
+(VyOS's own public mirror). Combined with `vyos_mirror_suite = "trixie"`
+(correct now - see above), `build-vyos-image` generates
+`deb https://packages.vyos.net/repositories/rolling trixie main` - but
+that mirror only has ever published a `rolling` suite, not `trixie`, so
+there is no `dists/trixie/Release` there and apt 404s on it. Live-build
+treats any configured-source fetch failure during chroot apt update as
+fatal (`E: An unexpected failure occurred, exiting...`), which aborts `lb
+build` entirely - `build-vyos-image`'s `cmd()` wrapper then raises the
+`OSError` above and the whole script exits.
+
+**This did not reach dependency resolution on `vyos-1x` at all** (the
+milestone brief's "expected to fail when installing vyos-1x" scenario),
+so there is no list of missing/unsatisfiable `vyos-1x` dependencies to
+report from this run - the failure is one level earlier, at the apt
+*source* level, before apt gets to resolving any package's dependencies.
+No mirror currently serves both `vyos-1x` and a suite literally named
+`trixie`: VyOS's public mirror has `vyos-1x` but only under `rolling`; our
+own repo (`https://ericgullickson.github.io/fbtech-nos`) serves suite
+`trixie` (matching `vyos_mirror_suite`) but does not have `vyos-1x`
+published yet (milestone 2's package-build pipeline is a separate,
+ongoing effort). Getting the actual "install vyos-1x against trixie"
+dependency-resolution signal needs either: (a) re-running the dry-run
+with `--vyos-mirror` pointed at our own repo once it has *something*
+published (even a partial overlay set would show real apt behaviour), or
+(b) `--custom-apt-entry`/`--custom-apt-key` to add a second source that
+has both `vyos-1x` and a `trixie` suite. Neither was attempted in this
+session; it's the natural next step once milestone 2 has published
+anything.
+
+**Minor, confirmed-harmless finding**: apt logged repeated
+`W: Target Packages (.../Packages) is configured multiple times in
+/etc/apt/sources.list:7 and /etc/apt/sources.list.d/trixie-backports.list:10`
+warnings during this run. This confirms the redundancy noted when
+`data/live-build-config/archives/trixie-backports.list.chroot` was added
+(`lb config --backports true` already adds an equivalent source
+automatically) - it is genuinely harmless (a `W:` warning, not an `E:`
+error, and did not block or slow the actual package installs), but noisy
+enough that removing the static `trixie-backports.list.chroot` and
+relying solely on `--backports true` would be a reasonable follow-up
+cleanup.
 
 ## Open items for milestone 4/5
 
-1. **`vyos_branch`/apt-suite-naming mismatch** (see above): reconcile
-   `data/defaults.toml`'s `vyos_branch = "fbtech"` /
-   `release_train = "fbtech"` with whatever suite name the milestone-2
-   packaging pipeline actually publishes under
-   `https://ericgullickson.github.io/fbtech-nos/` (the Dockerfile's own
-   apt line assumes `trixie`). One of the two needs to change once that
-   pipeline exists.
-2. **Real fbtech-nos apt signing key.** `data/live-build-config/archives/fbtech-nos.key.chroot`
-   is a placeholder text file with a TODO, not a real ASCII-armored PGP
-   key. Until the packaging pipeline publishes
-   `fbtech-nos-archive-keyring.asc`, both the Docker container build (falls
-   back to a disabled repo entry) and any live-build run that reaches
-   apt's signature check on that repo will not have a working key.
+1. ~~`vyos_branch`/apt-suite-naming mismatch`~~ **Fixed.** `vyos_mirror_suite
+   = "trixie"` now matches what the package-build pipeline's reprepro
+   config actually publishes (`Codename: trixie`), decoupled from
+   `vyos_branch`/`release_train` (kept as pure labels) and from
+   `component_git_branch` (the vyos-1x/component-fork git branch). See
+   "Fixing the `vyos_branch` conflation" above. New follow-on item: **no
+   mirror currently serves both `vyos-1x` and a `trixie` suite** (VyOS's
+   public mirror only has a `rolling` suite; our own repo has `trixie` but
+   no `vyos-1x` yet) - see "Where the trixie ISO dry-run stopped", run 2.
+   Revisit once milestone 2 publishes anything.
+2. ~~Real fbtech-nos apt signing key~~ **Fixed.**
+   `data/live-build-config/archives/fbtech-nos.key.chroot` now has the
+   real key from `origin/main:overlay/fbtech-nos-archive-keyring.asc`, and
+   `fbtech-nos.pref.chroot` pins by `Origin: fbtech-nos` (`o=`) rather than
+   suite name (`n=`), since our repo's `Codename: trixie` collides with
+   Debian's own trixie Codename and an `n=` pin would have matched both.
 3. **`vyos-1x` Depends that trixie cannot satisfy**, from
    `docs/FORK-ANALYSIS.md` section 4/item 5, still apply verbatim since
    `vyos-1x`'s `debian/control` has not been touched yet (milestone 4):
@@ -463,8 +508,17 @@ on trixie, then revert.
    `build-vyos-image` were deliberately left alone in this milestone (out
    of scope: this is product branding/identity, not a kernel or
    Debian-base dependency) but will need a decision in milestone 4/5.
-9. **Dry-run coverage.** As described above, if the dry-run's apt-suite
-   mismatch causes it to fail before reaching `vyos-1x` dependency
-   resolution, a second dry-run against a mirror that actually serves a
-   matching suite is needed to get the dependency-resolution signal the
-   milestone brief was after.
+9. **Dry-run coverage.** Confirmed (run 2): debootstrap and ordinary
+   Debian package installation via live-build both work on trixie. Still
+   not exercised: apt dependency resolution for `vyos-1x` itself, and by
+   extension the `debian/control` Depends issues in item 3 - that needs a
+   `--vyos-mirror` (or `--custom-apt-entry`) that actually has `vyos-1x`
+   published under a `trixie`-suite-compatible source once milestone 2
+   exists.
+10. **Redundant `trixie-backports` source (confirmed harmless).** Run 2
+    logged repeated `W: Target Packages ... is configured multiple times`
+    warnings between `--backports true`'s auto-generated source and the
+    static `data/live-build-config/archives/trixie-backports.list.chroot`.
+    Not build-breaking, but removing the static `.list.chroot` (keeping
+    only `trixie-backports.pref.chroot` for the pin) would be a clean,
+    low-risk follow-up.
