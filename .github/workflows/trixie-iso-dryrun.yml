@@ -1,12 +1,17 @@
 name: Trixie ISO dry-run
 
-# Manual only. This is expected to fail: vyos-1x (and the rest of the
-# overlay) is not published for trixie yet (see docs/FORK-PLAN.md milestone
-# 2), so live-build will eventually fail to install it against the
-# fbtech-nos/trixie base built by build-container.yml. The point of running
-# it is to see how far the Debian side of the build gets before that
-# happens, and to capture the exact failure and any unsatisfiable
-# dependencies for docs/TRIXIE-BASE.md.
+# Manual only. Uses our own apt repo (data/defaults.toml's vyos_mirror /
+# vyos_mirror_suite, currently https://ericgullickson.github.io/fbtech-nos
+# suite trixie) rather than an explicit --vyos-mirror override, so this
+# also exercises the repo's signed Release/InRelease fetch and the
+# fbtech-nos.key.chroot/fbtech-nos.pref.chroot Origin pin. This is
+# expected to fail: vyos-1x (and the rest of the overlay) is not published
+# there yet (see docs/FORK-PLAN.md milestone 2), so live-build should get
+# through apt's signature check on our repo and then fail to find an
+# installation candidate for vyos-1x. The point of running it is to see
+# how far the Debian side of the build gets before that happens, and to
+# capture the exact failure and any unsatisfiable dependencies for
+# docs/TRIXIE-BASE.md.
 on:
   workflow_dispatch:
 
@@ -35,7 +40,6 @@ jobs:
             --build-by ci@fbtech-nos \
             --build-type release \
             --version dryrun \
-            --vyos-mirror https://packages.vyos.net/repositories/rolling/ \
             generic 2>&1 | tee /tmp/dryrun.log
           echo "build_exit_code=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
 
