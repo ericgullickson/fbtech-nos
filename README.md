@@ -1,6 +1,14 @@
 VyOS toplevel build
 ===================
 
+# fbtech-nos
+
+This repository is also the base for **fbtech-nos**, a fork of VyOS aiming to source as many
+packages as possible from upstream Debian while keeping the VyOS CLI, config system, and image
+layout. See [docs/FORK-PLAN.md](docs/FORK-PLAN.md) for the fork plan and milestones.
+
+[![Build fbtech-nos ISO](https://github.com/ericgullickson/fbtech-nos/actions/workflows/build-iso.yml/badge.svg)](https://github.com/ericgullickson/fbtech-nos/actions/workflows/build-iso.yml)
+
 For the most up-to-date documentation, please read the online build guide at
 [docs.vyos.io](https://docs.vyos.io/en/latest/contributing/build-vyos.html).
 

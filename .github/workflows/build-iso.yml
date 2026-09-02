@@ -1,0 +1,142 @@
+name: Build fbtech-nos ISO
+
+# Milestone 1 of the fbtech-nos fork plan (docs/FORK-PLAN.md): build the
+# unmodified VyOS rolling ISO with VyOS's own public package mirror and
+# container in GitHub Actions, and publish it as a GitHub Release. This
+# proves the CI pipeline before any fork-specific changes land.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - ci/iso-build
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    container:
+      image: vyos/vyos-build:rolling
+      options: --sysctl net.ipv6.conf.lo.disable_ipv6=0 --privileged
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Generate ISO version string
+        id: version
+        run: echo "version=$(date -u +'%Y.%m.%d-%H%M')-fbtech" >> "$GITHUB_OUTPUT"
+
+      - name: Show available disk space
+        run: df -h
+
+      - name: Build VyOS ISO image
+        run: |
+          sudo --preserve-env ./build-vyos-image \
+            --architecture amd64 \
+            --build-by 16152721+ericgullickson@users.noreply.github.com \
+            --build-type release \
+            --debian-mirror http://deb.debian.org/debian/ \
+            --debian-security-mirror http://deb.debian.org/debian-security \
+            --version ${{ steps.version.outputs.version }} \
+            --vyos-mirror https://packages.vyos.net/repositories/rolling/ \
+            generic
+
+      - name: Rename ISO and generate checksum
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          ISO_NAME="fbtech-nos-${VERSION}-amd64.iso"
+          mv build/live-image-amd64.hybrid.iso "build/${ISO_NAME}"
+          ( cd build && sha256sum "${ISO_NAME}" > "${ISO_NAME}.sha256" )
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: fbtech-nos-iso-${{ steps.version.outputs.version }}
+          retention-days: 14
+          path: |
+            build/fbtech-nos-*-amd64.iso
+            build/fbtech-nos-*-amd64.iso.sha256
+            build/manifest.json
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: fbtech-nos-iso-${{ needs.build.outputs.version }}
+          path: release-assets
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.build.outputs.version }}"
+          gh release create "${VERSION}" \
+            --prerelease \
+            --title "fbtech-nos ${VERSION}" \
+            --notes "Unmodified VyOS rolling baseline ISO, built from VyOS's public package mirror (https://packages.vyos.net/repositories/rolling/) via GitHub Actions. This is Milestone 1 of the fbtech-nos fork plan (docs/FORK-PLAN.md): it proves the ISO build/release pipeline and contains no fork-specific changes yet." \
+            release-assets/fbtech-nos-*-amd64.iso \
+            release-assets/fbtech-nos-*-amd64.iso.sha256 \
+            release-assets/manifest.json
+
+  boot-test:
+    needs: build
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    container:
+      image: vyos/vyos-build:rolling
+      options: --sysctl net.ipv6.conf.lo.disable_ipv6=0 --privileged
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: fbtech-nos-iso-${{ needs.build.outputs.version }}
+          path: build
+
+      - name: Boot-test the ISO in QEMU
+        run: |
+          # GitHub-hosted runners do not expose /dev/kvm, so QEMU always runs
+          # in TCG (software emulation) here - scripts/check-qemu-install
+          # already detects the absence of /dev/kvm and drops -enable-kvm on
+          # its own, so no extra flag is needed for that.
+          #
+          # scripts/check-qemu-install unconditionally installs the ISO to a
+          # virtual disk, reboots into the installed system, logs in, and
+          # runs a small set of baseline CLI checks (basic_cli_tests:
+          # configure/exit, show version, show interfaces, etc., plus a MAC
+          # address / interface naming check) before shutting down - this
+          # already proves the ISO installs and boots to a working VyOS CLI.
+          # We deliberately do NOT pass --smoketest or --configtest (what
+          # `make test` / `make testc` use): those additionally run the full
+          # vyos-smoketest suite or the config load/commit + PKI generation
+          # suite, which take much longer and are overkill for "does this
+          # ISO boot" - a check better suited to the (heavier, KVM-less)
+          # package-smoketest workflow. Omitting all test-mode flags is the
+          # cheapest mode check-qemu-install offers that still exercises a
+          # full install + reboot + CLI login.
+          ISO=$(ls build/fbtech-nos-*-amd64.iso)
+          sudo scripts/check-qemu-install --debug --iso "$ISO" --cpu 2 --memory 4
