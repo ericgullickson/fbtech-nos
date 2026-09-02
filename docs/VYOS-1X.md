@@ -95,6 +95,34 @@ group no longer exists once `vpp`'s Depends are gone) and a vestigial
   upstream (nose2 in #4728, SSH DSA deprecation in #4731, both already
   present on `rolling` and therefore inherited by this fork unchanged).
 
+## pylint 3.x and Python 3.13
+
+`debian/rules`' `make all` chain runs `pylint --errors-only`
+(`Makefile`'s `pylint` target), which fails the whole build on any
+E-level finding. trixie ships pylint 3.3.4 (bookworm has 2.x); its
+stricter control-flow analysis (`possibly-used-before-assignment`,
+E0606) surfaced about a dozen pre-existing sites - none on dropped
+features - where a variable is only assigned on some branches of an
+if/elif chain but used unconditionally afterwards (e.g.
+`src/conf_mode/firewall.py`, `python/vyos/nat.py`,
+`src/conf_mode/vpn_ipsec.py`, several `src/op_mode/*.py` files). Each
+was fixed either by initializing the variable before the branch (when
+the branches are mutually exclusive and exhaustive by construction but
+pylint can't prove it across separate `if`s), or with a targeted
+`# pylint: disable=possibly-used-before-assignment` at the call site
+for the handful of cases where a module-level global is assigned in
+`if __name__ == '__main__':` and always initialized before the
+function using it runs (a pattern used throughout VyOS's op-mode
+scripts). `src/services/vyos-netlinkd` additionally hit
+`unexpected-keyword-arg`/`too-many-function-args` for two pyroute2
+calls that are already wrapped in a `TypeError` fallback for older
+pyroute2 versions - also silenced inline, not restructured.
+
+Separately, **not** a pylint finding but a real Python 3.13 break:
+`src/op_mode/show_users.py` imported the `spwd` module, removed from
+the standard library in 3.13 (PEP 594). `is_locked()` now reads
+`/etc/shadow` directly instead, same data and privilege requirement.
+
 ## `python/vyos/ifconfig/interface.py`: `link_detect`
 
 `Interface.set_link_detect()` now checks whether
@@ -212,7 +240,14 @@ VyOS's own `999.0-<count>-g<sha>` packages.
    not by default - `nose2.cfg`'s `start-dir = src` only covers
    `src/tests`, not `smoketest/`), this would not surface during the
    package build; it would only matter for a future `make testc` run.
-5. **Build not yet verified end-to-end.** See the final report for
-   where this stands (container build attempted/blocked, GitHub Actions
-   run, `apt-get install --dry-run` result) as of this milestone's
-   commits.
+5. **Build verification status:** a first `docker run -m 2500m
+   ghcr.io/ericgullickson/fbtech-nos-build:trixie` against the pinned
+   `fbtech-nos-1x` commit got all the way through `opam pin`/OCaml
+   compilation of `libvyosconfig0`, `interface_definitions`/template
+   generation (validating this milestone's XML deletions and the
+   `system_login`/`system_option` partial edits), and into
+   `dpkg-buildpackage`, then failed on `make pylint` - see "pylint 3.x
+   and Python 3.13" above for the fix, now committed as
+   `fbtech-nos-1x@d72243b18441951f463419fb4c76e9a127634396` and pinned
+   in `overlay/vyos-1x/build.sh`. See the final report for the result of
+   the `build-packages.yml` run against this commit.

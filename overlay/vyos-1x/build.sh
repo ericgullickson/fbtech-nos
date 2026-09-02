@@ -26,8 +26,10 @@ OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 REPO_URL="https://github.com/ericgullickson/fbtech-nos-1x.git"
 REPO_BRANCH="fbtech"
 # Pinned commit on the fbtech branch (see fbtech-nos-1x's own git log for
-# the matching "vyos-1x: bump fork version to 1.5.0+fbtech1" commit).
-REPO_COMMIT="ce97c1c468a913bebd95236704800e99e7db7c29"
+# the matching "vyos-1x: fix trixie's pylint 3.x and Python 3.13 findings"
+# commit - the first commit at which a full container build got past
+# `make pylint`).
+REPO_COMMIT="d72243b18441951f463419fb4c76e9a127634396"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
