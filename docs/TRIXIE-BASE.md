@@ -232,10 +232,29 @@ lines matching common apt/dependency failure patterns.
 
 ## Verified
 
-- [FILL IN AFTER CI RUN] `build-container.yml` run: <URL> - image built and
-  pushed to `ghcr.io/ericgullickson/fbtech-nos-build:trixie`.
-- [FILL IN AFTER CI RUN] Package visibility: public / could not be set via API (see run log).
-- [FILL IN AFTER CI RUN] `trixie-iso-dryrun.yml` run: <URL>.
+- `build-container.yml` run (push-triggered):
+  https://github.com/ericgullickson/fbtech-nos/actions/runs/33651860230 -
+  built and pushed `ghcr.io/ericgullickson/fbtech-nos-build:trixie` and
+  `:trixie-5c4368262fa0a76dd47c26a1c05ce2879290410e` successfully on the
+  first try (no iteration needed).
+- Package visibility: **public**, confirmed by pulling the manifest
+  anonymously (`curl https://ghcr.io/token?scope=repository:ericgullickson/fbtech-nos-build:pull`
+  then `GET /v2/ericgullickson/fbtech-nos-build/tags/list` with that token
+  returned `200` and both tags with no credentials at all). This is
+  because packages published from a public repository via `GITHUB_TOKEN`
+  default to public visibility. The workflow's own
+  `gh api -X PATCH .../visibility` step got a `404` as anticipated
+  (`GITHUB_TOKEN` cannot administer package visibility) - harmless since
+  the package was already public.
+- `trixie-iso-dryrun.yml` run:
+  https://github.com/ericgullickson/fbtech-nos/actions/runs/33653090330
+  (triggered via a temporary `push` trigger, since GitHub will not let a
+  `workflow_dispatch`-only workflow be dispatched via API/CLI until it
+  exists on the default branch - reverted to `workflow_dispatch`-only
+  immediately after this run; see the two `ci:`/`test:` commits around it
+  in the branch history). See "Where the trixie ISO dry-run stopped"
+  below for the result - it failed immediately, before live-build ever
+  started, on a real bug this milestone's config changes introduced.
 - The `live-build`/`debootstrap` source patches used in `docker/Dockerfile`
   were confirmed (via `patch --dry-run`) to still apply cleanly to the
   exact tags trixie ships (`debian/1%20250505+deb13u1`,
@@ -266,31 +285,63 @@ lines matching common apt/dependency failure patterns.
 
 ## Where the trixie ISO dry-run stopped, and why
 
-[FILL IN AFTER CI RUN - see `trixie-iso-dryrun.yml` run <URL> and its
-`trixie-dryrun-log` artifact.]
+**It stopped immediately, before live-build (or even `lb config`) ever ran,
+with:**
 
-Expected failure mode based on static analysis of the config (to be
-confirmed or corrected by the actual run):
+```
+E: Could not retrieve vyos-1x from branch fbtech: GitCommandError(['git', 'checkout', 'fbtech'], 1, b"error: pathspec 'fbtech' did not match any file(s) known to git", b'')
+```
 
-`data/defaults.toml` now sets `vyos_branch = "fbtech"`, which
-`build-vyos-image` uses verbatim to build the VyOS/overlay apt source line
-`deb {vyos_mirror} {vyos_branch} main`. The dry-run command explicitly
-overrides `--vyos-mirror` to VyOS's own public mirror
-(`https://packages.vyos.net/repositories/rolling/`), which only serves a
-`rolling` suite, not `fbtech`. So the generated source line is likely
-`deb https://packages.vyos.net/repositories/rolling/ fbtech main`, which
-has no `dists/fbtech/Release` on that mirror. If so, the build fails at
-`apt-get update` / `lb bootstrap` for that source, before live-build ever
-gets to resolving `vyos-1x`'s dependencies - i.e. earlier than the
-"expected" vyos-1x-against-trixie failure point described in the milestone
-brief. If that is what happens, it is arguably a more useful signal than a
-dependency failure would have been (it caught the `vyos_branch`/repo-suite
-naming inconsistency noted above), but it does mean this run does not yet
-tell us how far live-build gets into actually resolving `vyos-1x`'s
-Depends against trixie - that check still needs to happen, either by
-re-running the dry-run with `--vyos-mirror` pointed at a mirror that
-actually has a `fbtech` (or `trixie`) suite, or by using
-`--custom-apt-entry`/`--custom-apt-key` to add a second source that does.
+(full log: `trixie-dryrun-log` artifact on
+https://github.com/ericgullickson/fbtech-nos/actions/runs/33653090330).
+
+This is earlier, and a different failure, than the milestone brief
+anticipated ("expected to fail once live-build tries to install vyos-1x
+against trixie"). The cause is a real bug this milestone's
+`data/defaults.toml` change introduced:
+
+`build-vyos-image` uses `vyos_branch` for two unrelated things that happen
+to share one name in upstream VyOS but not in this fork:
+
+1. The apt suite/distribution component of the overlay repo line it
+   generates (`deb {vyos_mirror} {vyos_branch} main`).
+2. The git branch of `vyos-1x` it clones and checks out at the very start
+   of the build, purely to add `vyos-1x/python` to `sys.path` so
+   `build-vyos-image` can import a couple of helper modules from it
+   (`build()` in `scripts/image-build/build-vyos-image`, well before `lb
+   config` is ever invoked).
+
+This milestone set `vyos_branch = "fbtech"` for reason (1) (see
+`docs/FORK-PLAN.md`'s milestone-3 description), but `vyos-1x` itself is
+still unforked upstream `vyos/vyos-1x` until milestone 4 - it has no
+`fbtech` branch, only `rolling`/`sagitta`/`circinus`/etc. - so step (2)
+fails immediately and the whole build aborts before touching Debian, apt,
+or live-build at all.
+
+**What this means for milestone 4:** once `vyos-1x` is forked to
+`ericgullickson/fbtech-nos-1x` (or whatever name is chosen), either that
+fork needs a branch literally named `fbtech` (matching `vyos_branch`), or
+`VYOS1X_REPO_URL` needs to point at it with `git.Repo.clone_from(...);
+checkout(branch_name)` given a branch that exists, or `build-vyos-image`
+needs to stop conflating the apt suite name with the vyos-1x git branch
+(e.g. a separate `vyos_1x_git_branch` config key). Whichever fix is
+chosen, it has to land before any further dry-run can get past this point.
+
+**Follow-up run to actually exercise the Debian/live-build side:** to get
+the signal the milestone brief was after (how far live-build gets
+resolving `vyos-1x`'s dependencies against trixie), a second, purely
+exploratory run was attempted with `vyos_branch`/`release_train`
+temporarily set to `"rolling"` (an actual `vyos-1x` branch, and the real
+suite name on the `--vyos-mirror` the dry-run command points at). That
+change could not be committed/pushed in this session because of a local
+git-commit-signing outage (the 1Password SSH-signing agent used for
+commit signing on this machine stopped responding partway through this
+milestone and did not recover before the session ended - see the final
+report), so **that follow-up run did not happen**. It is a good next step
+for whoever picks this up: temporarily set `vyos_branch =
+"rolling"`/`release_train = "rolling"`, dispatch
+`trixie-iso-dryrun.yml`, capture how far `lb build` gets against `vyos-1x`
+on trixie, then revert.
 
 ## Open items for milestone 4/5
 

@@ -9,17 +9,6 @@ name: Trixie ISO dry-run
 # dependencies for docs/TRIXIE-BASE.md.
 on:
   workflow_dispatch:
-  # TEMPORARY: GitHub only allows workflow_dispatch API/CLI dispatch for a
-  # workflow once it exists on the default branch, which trixie-base isn't
-  # yet (it's an open PR). Added a push trigger here just to get this run
-  # once for the milestone-3 report; this is removed again (back to
-  # workflow_dispatch only, as intended long-term) in a follow-up commit
-  # once main has the workflow_dispatch-only version.
-  push:
-    branches:
-      - trixie-base
-    paths:
-      - '.github/workflows/trixie-iso-dryrun.yml'
 
 permissions:
   contents: read
