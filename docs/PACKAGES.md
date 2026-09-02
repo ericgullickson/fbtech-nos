@@ -167,5 +167,9 @@ Note: none of the four `vyos/*` upstream repositories have a branch literally na
 `current`; their default/active development branch is `rolling` (verified against
 `git ls-remote --heads` for each repo at the time this pipeline was built).
 
-`vyos1x-config` (OCaml, produces `libvyosconfig0`) is a stretch goal for a later phase
-of the package pipeline and is not yet part of this workflow.
+`vyos-1x` itself (which also produces `libvyosconfig0`, `vyos-1x-smoketest` and
+`vyos-1x-vmware`) has its own recipe at `overlay/vyos-1x/` - see `docs/VYOS-1X.md`.
+Unlike the four packages above it needs the full `ghcr.io/ericgullickson/fbtech-nos-build:trixie`
+image rather than bare `debian:trixie`, via `overlay/vyos-1x/image`, and is not yet
+wired into this workflow's static `matrix.package` list - it is meant to be picked up
+once auto-discovery of `overlay/*/build.sh` and per-package `image` files lands here.
