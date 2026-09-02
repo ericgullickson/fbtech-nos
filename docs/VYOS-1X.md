@@ -31,7 +31,7 @@ the current value).
 | SLA (OWAMP/TWAMP) | `service_sla.xml.in` | `owamp-client`, `owamp-server`, `twamp-client`, `twamp-server` |
 | Broadcast relay | `service_broadcast-relay.xml.in` | `udp-broadcast-relay` |
 | LCD | `system_lcd.xml.in` | `lcdproc`, `lcdproc-extra-drivers` |
-| HTTP API | `service_https.xml.in` | `vyos-http-api-tools`, `nginx-light` |
+| HTTP API | `service_https.xml.in`, plus its implementation (`src/services/api/` - the FastAPI/GraphQL/REST app, `src/services/vyos-http-api-server`, `data/templates/https/`) | `vyos-http-api-tools`, `nginx-light` |
 | AWS Gateway LB | `service_aws_glb.xml.in` (plus the whole `vyos-1x-aws` binary package, its systemd unit and Jinja template) | `aws-gwlbtool` (never a Debian package to begin with) |
 | VyOS Secure Boot shim | (Depends only) | `shim-signed`, `sbsigntool` (kept `mokutil`, `grub-efi-*-signed`, see below) |
 | VPN OpenConnect | `vpn_openconnect.xml.in` | `ocserv` |
@@ -247,7 +247,19 @@ VyOS's own `999.0-<count>-g<sha>` packages.
    generation (validating this milestone's XML deletions and the
    `system_login`/`system_option` partial edits), and into
    `dpkg-buildpackage`, then failed on `make pylint` - see "pylint 3.x
-   and Python 3.13" above for the fix, now committed as
-   `fbtech-nos-1x@d72243b18441951f463419fb4c76e9a127634396` and pinned
-   in `overlay/vyos-1x/build.sh`. See the final report for the result of
+   and Python 3.13" above for that fix. A first `build-packages.yml` CI
+   run with that fix applied got further but still failed `make pylint`:
+   its second invocation (the unused-import check) lints the whole
+   `src/services` tree unfiltered via `git ls-files ... src/services`,
+   and pylint 3.x's parser fails with E0001 syntax-error on non-Python
+   files - `.graphql` schema files and `.tmpl` Jinja templates - under
+   `src/services/api/graphql/`, which is fatal regardless of
+   `--disable=all`. `src/services/api/` (the HTTP API's FastAPI/GraphQL
+   app), `src/services/vyos-http-api-server` (its entrypoint) and
+   `data/templates/https/` (its nginx/systemd-unit Jinja templates) were
+   the last significant leftovers of the already-dropped HTTP API
+   feature (see "What was removed" above) and are now deleted outright,
+   as
+   `fbtech-nos-1x@bd99d446f4d16f601d34283380de28f7e3991e4c`, pinned in
+   `overlay/vyos-1x/build.sh`. See the final report for the result of
    the `build-packages.yml` run against this commit.

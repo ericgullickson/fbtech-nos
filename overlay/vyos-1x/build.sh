@@ -26,10 +26,11 @@ OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 REPO_URL="https://github.com/ericgullickson/fbtech-nos-1x.git"
 REPO_BRANCH="fbtech"
 # Pinned commit on the fbtech branch (see fbtech-nos-1x's own git log for
-# the matching "vyos-1x: fix trixie's pylint 3.x and Python 3.13 findings"
-# commit - the first commit at which a full container build got past
-# `make pylint`).
-REPO_COMMIT="d72243b18441951f463419fb4c76e9a127634396"
+# the matching "vyos-1x: delete src/services/api (the HTTP API's
+# FastAPI/GraphQL app)" commit - fixes make pylint choking on non-Python
+# .graphql/.tmpl files under src/services/api/graphql/, which the
+# Makefile's second pylint invocation lints unfiltered).
+REPO_COMMIT="bd99d446f4d16f601d34283380de28f7e3991e4c"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
