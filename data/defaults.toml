@@ -11,8 +11,38 @@ debian_archive_areas = "main contrib non-free non-free-firmware"
 
 vyos_mirror = "https://ericgullickson.github.io/fbtech-nos"
 
+# The apt sources.list suite/component for vyos_mirror above (reprepro's
+# "Codename:"/"Origin:" in the package-build pipeline's
+# .github/workflows/build-packages.yml). Note this collides in name with
+# Debian's own "trixie" suite - packages that exist in both places are
+# told apart by Origin (vyos_mirror_origin), not suite name, so pinning
+# must use "o=", not "n=". See data/live-build-config/archives/fbtech-nos.pref.chroot
+# and docs/TRIXIE-BASE.md.
+vyos_mirror_suite = "trixie"
+vyos_mirror_origin = "fbtech-nos"
+
+# vyos_branch/release_train are release-train *labels* only (os-release
+# strings, ISO version metadata) - deliberately NOT used for the apt
+# suite (vyos_mirror_suite, above) or for the component-repo git branch
+# (component_git_branch, below). Those three used to be conflated into
+# one setting; see docs/TRIXIE-BASE.md for why that broke the trixie
+# ISO dry-run.
 vyos_branch = "fbtech"
 release_train = "fbtech"
+
+# Where build-vyos-image checks out vyos-1x from (see build-vyos-image's
+# vyos-1x checkout, near the top of build()): this isn't optional or just
+# for a version string, scripts/image-build/utils.py and raw_image.py both
+# `import vyos` straight out of this checkout for real functionality used
+# throughout the whole build (vyos.utils.process.call/rc_cmd behind every
+# cmd()/rc_cmd() call including `lb config`/`lb build` themselves,
+# vyos.defaults for path/activation-hint constants, vyos.template for
+# raw-image rendering). component_repos maps our logical package names to
+# their (renamed) fork repos under component_git_org, all on
+# component_git_branch; only "vyos-1x" is actually consumed by
+# build-vyos-image today, the rest is here for other tooling/milestones.
+component_git_org = "ericgullickson"
+component_git_branch = "fbtech"
 
 # Debian's stock kernel, not a self-built one. "amd64" is the live-build
 # flavour name for the linux-image-amd64 metapackage; the actual kernel
@@ -30,3 +60,10 @@ support_url = "https://github.com/ericgullickson/fbtech-nos/issues"
 bugtracker_url = "https://github.com/ericgullickson/fbtech-nos/issues"
 documentation_url = "https://github.com/ericgullickson/fbtech-nos/blob/main/README.md"
 project_news_url = "https://github.com/ericgullickson/fbtech-nos/releases"
+
+[component_repos]
+vyos-1x = "fbtech-nos-1x"
+vyatta-cfg = "fbtech-nos-vyatta-cfg"
+vyatta-bash = "fbtech-nos-vyatta-bash"
+live-boot = "fbtech-nos-live-boot"
+live-build = "fbtech-nos-live-build"

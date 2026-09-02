@@ -1,3 +1,9 @@
+# Pinned by Origin (o=), not suite/codename (n=): our repo's reprepro
+# config (.github/workflows/build-packages.yml) publishes Codename:
+# trixie, which is the same string Debian's own main archive reports as
+# its Codename - an n=trixie pin here would match ordinary Debian trixie
+# packages too, not just ours. Origin: fbtech-nos is unique to our repo.
+# See docs/TRIXIE-BASE.md.
 Package: *
-Pin: release n=fbtech
+Pin: release o=fbtech-nos
 Pin-Priority: 999

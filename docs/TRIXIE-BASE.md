@@ -71,19 +71,81 @@ grub2/grub-pc/grub-efi-*, u-boot-tools, debmake, etc.).
 - `debian_distribution`: `bookworm` -> `trixie`.
 - `vyos_mirror`: `https://packages.vyos.net/repositories/rolling` ->
   `https://ericgullickson.github.io/fbtech-nos`.
-- `vyos_branch` / `release_train`: `rolling` -> `fbtech`.
+- `vyos_branch` / `release_train`: `rolling` -> `fbtech` (labels only - see
+  "Fixing the `vyos_branch` conflation" below).
 - `kernel_version` removed; `kernel_flavor`: `vyos` -> `amd64`. This is now
   the live-build *flavour* name for Debian's `linux-image-amd64`
   metapackage, not a specific kernel version - see below.
 - `website_url`/`support_url`/`bugtracker_url`/`documentation_url`/`project_news_url`
   repointed at `github.com/ericgullickson/fbtech-nos`.
+- Added `vyos_mirror_suite`, `vyos_mirror_origin`, `component_git_org`,
+  `component_git_branch`, and a `[component_repos]` table - see next
+  section.
 
-**Open inconsistency (see Open items):** the Dockerfile's own apt line uses
-suite `trixie` (`.../fbtech-nos trixie main`) while `vyos_branch` /
-`release_train` here is `fbtech`, which `build-vyos-image` uses to build
-`deb {vyos_mirror} {vyos_branch} main` - i.e. it expects a `fbtech` suite
-under the same repo root. Whichever the milestone-2 packaging pipeline
-actually publishes needs to match one of these; right now they disagree.
+### Fixing the `vyos_branch` conflation (follow-up)
+
+The first pass at this milestone set `vyos_branch = "fbtech"` and hit an
+immediate dry-run failure (see "Where the trixie ISO dry-run stopped"):
+`build-vyos-image` was using that single setting for three unrelated
+things that happen to share a name in upstream VyOS but not in this fork.
+Investigated with `grep -n "GitCommandError\|vyos-1x\|checkout"
+scripts/image-build/build-vyos-image`, which turned up all three call
+sites in `build()`:
+
+1. **The apt suite of the overlay/VyOS package mirror** (`deb {vyos_mirror}
+   {vyos_branch} main`, near the end of `build()`).
+2. **The git branch checked out for `vyos-1x`**, right at the top of
+   `build()`, before `lb config` is ever touched. This is *not* optional
+   and not just for a version string: the very next lines add
+   `build/vyos-1x/python` to `sys.path` and then `import utils` /
+   `import raw_image` (`scripts/image-build/utils.py`,
+   `scripts/image-build/raw_image.py`), both of which `import vyos`
+   directly out of that checkout - `vyos.utils.process.call`/`rc_cmd` is
+   what the `cmd()`/`rc_cmd()` helpers used for *every* shell command in
+   this script (including `lb config` and `lb build` themselves) actually
+   call; `vyos.defaults` supplies the `directories`/`activation_hint`/
+   `activation_init` constants; `vyos.template` is used by
+   `raw_image.py`. There is no lazy/optional path here - the script
+   cannot do anything at all without a working vyos-1x checkout.
+3. **The apt pin's `Pin: release n=...` value**, in the `lb config`
+   section. This one wasn't even mentioned as broken by the original
+   dry-run (it never got that far), but decoupling suite from label would
+   have silently broken it too: it was pinning by `release_train`
+   ("fbtech"), which no longer matches the actual suite name once (1) uses
+   a separate `vyos_mirror_suite`.
+
+Fix: introduced `vyos_mirror_suite = "trixie"` for (1),
+`component_git_org = "ericgullickson"` / `component_git_branch = "fbtech"`
+/ a `[component_repos]` table (mapping `vyos-1x` -> the actual fork name
+`fbtech-nos-1x`, and the other four known component forks for future use)
+for (2), and kept `vyos_branch`/`release_train = "fbtech"` as pure labels
+(`os-release` strings, ISO version metadata) used nowhere else. The
+`vyos-1x` checkout now clones `https://github.com/{component_git_org}/
+{component_repos['vyos-1x']}` (i.e. `ericgullickson/fbtech-nos-1x`) at
+`component_git_branch` (`fbtech`) - both env-overridable
+(`VYOS1X_REPO_URL`, and a new `VYOS1X_REPO_BRANCH`) as before.
+
+For (3), pinning was switched from suite/codename (`n=`) to **Origin**
+(`o=`): the package-build pipeline's reprepro config
+(`.github/workflows/build-packages.yml` on `main`) publishes `Codename:
+trixie` for our own repo - the same string Debian's own main archive
+reports as its Codename. An `n=trixie` pin would therefore match Debian's
+ordinary trixie packages too, not just ours, silently defeating the whole
+point of pinning. `Origin: fbtech-nos` (also set by that reprepro config)
+is unique to our repo, so both the dynamically-generated pin file
+(`build-vyos-image`, `VYOS_PIN_FILE`) and the static
+`data/live-build-config/archives/fbtech-nos.pref.chroot` now pin
+`o={vyos_mirror_origin}` (`o=fbtech-nos`) instead. This is also how
+`fbtech-nos.pref.chroot` satisfies "pin our repo above Debian for the
+packages we override" (e.g. a self-built `bash-completion`, if one is
+ever published under our repo) - the pin is unconditional on package name
+(`Package: *`), so it applies to anything we publish, without needing a
+per-package pin entry.
+
+`data/live-build-config/archives/fbtech-nos.key.chroot` was replaced with
+the real signing key from `origin/main:overlay/fbtech-nos-archive-keyring.asc`
+(the package-build pipeline's actual published key), replacing the earlier
+TODO placeholder.
 
 ### Kernel: self-built VyOS kernel -> Debian's `linux-image-amd64`
 
