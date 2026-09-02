@@ -1,0 +1,220 @@
+name: Build overlay packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - ci/packages
+    paths:
+      - 'overlay/**'
+      - '.github/workflows/build-packages.yml'
+
+permissions:
+  contents: read
+
+env:
+  PAGES_URL: https://ericgullickson.github.io/fbtech-nos
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - unionfs-fuse
+          - ipaddrcheck
+          - vyatta-biosdevname
+          - hvinfo
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:trixie
+    steps:
+      - name: Install git (bare debian:trixie has none)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Build ${{ matrix.package }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/out"
+          OUT_DIR="${GITHUB_WORKSPACE}/out" bash "overlay/${{ matrix.package }}/build.sh"
+
+      - name: Upload built packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: debs-${{ matrix.package }}
+          path: out/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download all built packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: debs-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: List downloaded packages
+        run: ls -la artifacts
+
+      - name: Install reprepro and gnupg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends reprepro gnupg
+
+      - name: Import apt signing key
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          GNUPGHOME="${RUNNER_TEMP}/gnupg"
+          mkdir -m 700 -p "${GNUPGHOME}"
+          echo "GNUPGHOME=${GNUPGHOME}" >> "$GITHUB_ENV"
+          printf '%s\n' "${APT_SIGNING_KEY}" | gpg --homedir "${GNUPGHOME}" --batch --import
+          KEYID=$(gpg --homedir "${GNUPGHOME}" --batch --list-secret-keys --with-colons | awk -F: '/^fpr:/{print $10; exit}')
+          if [ -z "${KEYID}" ]; then
+            echo "::error::Could not determine signing key fingerprint from APT_SIGNING_KEY secret" >&2
+            exit 1
+          fi
+          echo "KEYID=${KEYID}" >> "$GITHUB_ENV"
+
+      - name: Fetch previous published pool (if any)
+        run: |
+          set -euo pipefail
+          mkdir -p pages-old
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git clone --depth 1 --branch gh-pages \
+              "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+              pages-old
+          else
+            echo "No existing gh-pages branch yet; starting a fresh repository."
+          fi
+
+      - name: Build signed apt repository with reprepro
+        run: |
+          set -euo pipefail
+          mkdir -p repo/conf
+          cat > repo/conf/distributions <<EOF
+          Origin: fbtech-nos
+          Label: fbtech-nos
+          Codename: trixie
+          Architectures: amd64
+          Components: main
+          Description: fbtech-nos overlay package repository
+          SignWith: ${KEYID}
+          EOF
+
+          # Carry forward packages published by previous runs, so a package
+          # missing from this run (e.g. temporarily removed from the matrix)
+          # is not dropped from the repository.
+          if [ -d pages-old/pool ]; then
+            cp -r pages-old/pool repo/pool
+            find repo/pool -name '*.deb' ! -name '*-dbgsym_*' -print0 \
+              | xargs -0 -r -n1 reprepro -b repo --keepunreferencedfiles includedeb trixie
+          fi
+
+          # Add this run's freshly built packages (skip debug-symbol .debs;
+          # they are still available as build artifacts if ever needed).
+          find artifacts -name '*.deb' ! -name '*-dbgsym_*' -print0 \
+            | xargs -0 -n1 reprepro -b repo includedeb trixie
+
+          reprepro -b repo export trixie
+
+      - name: Assemble GitHub Pages site
+        run: |
+          set -euo pipefail
+          rm -rf site
+          mkdir -p site
+          cp -r repo/pool site/pool
+          cp -r repo/dists site/dists
+          cp overlay/fbtech-nos-archive-keyring.asc site/fbtech-nos-archive-keyring.asc
+          touch site/.nojekyll
+          cat > site/index.html <<HTML
+          <!doctype html>
+          <html lang="en">
+          <head>
+          <meta charset="utf-8">
+          <title>fbtech-nos apt repository</title>
+          </head>
+          <body>
+          <h1>fbtech-nos apt repository</h1>
+          <p>Signed apt repository of fbtech-nos overlay packages for Debian trixie.</p>
+          <p>Add it with:</p>
+          <pre>curl -fsSL ${PAGES_URL}/fbtech-nos-archive-keyring.asc | sudo tee /usr/share/keyrings/fbtech-nos-archive-keyring.asc >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/fbtech-nos-archive-keyring.asc] ${PAGES_URL} trixie main" | sudo tee /etc/apt/sources.list.d/fbtech-nos.list
+          sudo apt-get update</pre>
+          <p>Source: <a href="https://github.com/${{ github.repository }}">${{ github.repository }}</a></p>
+          </body>
+          </html>
+          HTML
+
+      - name: Push to gh-pages
+        run: |
+          set -euo pipefail
+          cd site
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Publish apt repository ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git push --force origin HEAD:gh-pages
+
+  verify:
+    needs: publish
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:trixie
+    steps:
+      - name: Install prerequisites
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl gnupg
+
+      - name: Wait for GitHub Pages to serve the new InRelease
+        run: |
+          set -euo pipefail
+          url="${PAGES_URL}/dists/trixie/InRelease"
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)
+            if [ "$code" = "200" ]; then
+              echo "InRelease is live (attempt $i)."
+              exit 0
+            fi
+            echo "Attempt $i: got HTTP $code for $url, retrying in 30s..."
+            sleep 30
+          done
+          echo "::error::Timed out waiting for ${url} to become available"
+          exit 1
+
+      - name: Configure the fbtech-nos apt repository
+        run: |
+          set -euo pipefail
+          curl -fsSL "${PAGES_URL}/fbtech-nos-archive-keyring.asc" -o /usr/share/keyrings/fbtech-nos-archive-keyring.asc
+          echo "deb [signed-by=/usr/share/keyrings/fbtech-nos-archive-keyring.asc] ${PAGES_URL} trixie main" \
+            > /etc/apt/sources.list.d/fbtech-nos.list
+          apt-get update
+
+      - name: Install and smoke-test overlay packages
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get install -y unionfs-fuse ipaddrcheck vyatta-biosdevname hvinfo
+          unionfs-fuse --version
+          ipaddrcheck --version
