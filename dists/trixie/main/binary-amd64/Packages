@@ -1,0 +1,274 @@
+Package: bash-completion
+Version: 2:2.8-6+fbtech1
+Architecture: all
+Maintainer: Gabriel F. T. Gomes <gabriel@inconstante.eti.br>
+Installed-Size: 1354
+Multi-Arch: foreign
+Homepage: https://github.com/scop/bash-completion
+Priority: standard
+Section: shells
+Filename: pool/main/b/bash-completion/bash-completion_2.8-6+fbtech1_all.deb
+Size: 197656
+SHA256: befbb9c01fee7c1a674910af0076464b927daa34873742919061fcf6f2dc212d
+SHA1: 76fc9bb2cb291b1f2810e1ec5266781140e63dd5
+MD5sum: 7c8ab15e7b1953a868b7871b09dfd06a
+Description: programmable completion for the bash shell
+ bash completion extends bash's standard completion behavior to achieve
+ complex command lines with just a few keystrokes.  This project was
+ conceived to produce programmable completion routines for the most
+ common Linux/UNIX commands, reducing the amount of typing sysadmins
+ and programmers need to do on a daily basis.
+
+Package: hvinfo
+Version: 1.2.1
+Architecture: amd64
+Maintainer: Daniil Baturin <daniil@baturin.org>
+Installed-Size: 72
+Depends: libc6 (>= 2.34), libgcc-s1 (>= 3.0), libgnat-14 (>= 14.2.0)
+Priority: extra
+Section: contrib/utilities
+Filename: pool/main/h/hvinfo/hvinfo_1.2.1_amd64.deb
+Size: 18180
+SHA256: 51eda8b1062671b5d0dbf70549bd160cd8a1d02916306d4b9a509284f82fa70f
+SHA1: 6d6863a2ff05975d7280a97ab65f7297382ff336
+MD5sum: 0afa42ee5237d6ca41caa2ff3784f5bf
+Description: Hypervisor detection tool
+ A hypervisor detection tool that supports detecting
+ KVM, Xen PV or HVM, VMware, Bhyve, and other full virtualization environments.
+
+Package: ipaddrcheck
+Version: 1.4
+Architecture: amd64
+Maintainer: VyOS Package Maintainers <maintainers@vyos.net>
+Installed-Size: 45
+Depends: libc6 (>= 2.34), libcidr0, libpcre2-8-0 (>= 10.22)
+Priority: extra
+Section: contrib/net
+Filename: pool/main/i/ipaddrcheck/ipaddrcheck_1.4_amd64.deb
+Size: 11048
+SHA256: 2ccbefde8879befbd7d3d01c512d3b9a9284b32bd4becb49d65c7cdbd3bfe873
+SHA1: bea78cd2e68452d519ef5f7b31a3f7e62bf3a46d
+MD5sum: 563aab005c16f879877a92f132171530
+Description: IPv4 and IPv6 address validation utility
+ A validation utility for IPv4 and IPv6 addresses.
+
+Package: libvyatta-cfg-dev
+Source: vyatta-cfg
+Version: 0.102.0+vyos2+current6
+Architecture: amd64
+Maintainer: VyOS Package Maintainers <maintainers@vyos.net>
+Installed-Size: 1373
+Depends: libvyatta-cfg1 (>= 0.102.0+vyos2+current6), libboost-filesystem1.83.0
+Priority: optional
+Section: libdevel
+Filename: pool/main/v/vyatta-cfg/libvyatta-cfg-dev_0.102.0+vyos2+current6_amd64.deb
+Size: 250824
+SHA256: 5c7f1faf7addadf541101f4853eef57d8097c706a93716b9b3f872bd2b8ec15f
+SHA1: 03f1f15ee1dedbddafac2f89478d1ceabc7af399
+MD5sum: 48bb30ba002bef8e7bb13d0e6929ea53
+Description: libvyatta-cfg development package
+ Development header and library files for the Vyatta configuration back-end
+ library.
+
+Package: libvyatta-cfg1
+Source: vyatta-cfg
+Version: 0.102.0+vyos2+current6
+Architecture: amd64
+Maintainer: VyOS Package Maintainers <maintainers@vyos.net>
+Installed-Size: 627
+Depends: libapt-pkg7.0 (>= 1.1~exp9), libboost-filesystem1.83.0 (>= 1.83.0), libc6 (>= 2.38), libgcc-s1 (>= 3.0), libglib2.0-0t64 (>= 2.30.0), libstdc++6 (>= 13.1)
+Replaces: vyatta-cfg
+Priority: extra
+Section: contrib/net
+Filename: pool/main/v/vyatta-cfg/libvyatta-cfg1_0.102.0+vyos2+current6_amd64.deb
+Size: 209488
+SHA256: 394e6c51b1d1f1dbbfeb5a626aa620b0a335419685c0398c19e90282def0c7e6
+SHA1: b90bc466b7d4beec560ba7c5712c83d23f37f7ce
+MD5sum: 044b643d5e95f0c3bb87038a81330ad1
+Description: vyatta-cfg back-end library
+ Vyatta configuration back-end library (libvyatta-cfg).
+
+Package: live-boot
+Version: 2:20151213.vyos1+fbtech1
+Architecture: all
+Maintainer: Live Systems Maintainers <debian-live@lists.debian.org>
+Installed-Size: 117
+Depends: live-boot-initramfs-tools | live-boot-backend
+Recommends: live-boot-doc, live-tools, rsync, uuid-runtime
+Suggests: cryptsetup, curlftpfs, httpfs2, wget
+Homepage: https://debian-live.alioth.debian.org/live-boot/
+Priority: optional
+Section: misc
+Filename: pool/main/l/live-boot/live-boot_20151213.vyos1+fbtech1_all.deb
+Size: 27128
+SHA256: 7b10748b0beb0c287eb260f8b4c12c5348b967ab157a2f2c96b35822893b705c
+SHA1: a1b6cb7d192ca8f24778ab1f9074e13546362b47
+MD5sum: 28c8e5e26eeee4ca4725299c461ad186
+Description: Live System Boot Components
+ The Live Systems project maintains the components to build Debian based Live
+ systems and the official Debian Live images themselves.
+ .
+ live-boot contains the components to configure a live system during the boot
+ process (early userspace).
+ .
+ In addition to live-boot, a backend for the initrd generation is required, such
+ as live-boot-initramfs-tools.
+
+Package: live-boot-doc
+Source: live-boot
+Version: 2:20151213.vyos1+fbtech1
+Architecture: all
+Maintainer: Live Systems Maintainers <debian-live@lists.debian.org>
+Installed-Size: 62
+Homepage: https://debian-live.alioth.debian.org/live-boot/
+Priority: optional
+Section: doc
+Filename: pool/main/l/live-boot/live-boot-doc_20151213.vyos1+fbtech1_all.deb
+Size: 40968
+SHA256: 6efc0f24a4110ac6f98f4ca371c8a17dff24d04cd01b8113933484a0e56df060
+SHA1: be80c74328a3189b5c45b41210fb0b9ebfdcd94b
+MD5sum: 7f47c4b88be59a9eaa91b65b24eb5677
+Description: Live System Boot Components (documentation)
+ The Live Systems project maintains the components to build Debian based Live
+ systems and the official Debian Live images themselves.
+ .
+ live-boot contains the components to configure a live system during the boot
+ process (early userspace).
+ .
+ This package contains the documentation.
+
+Package: live-boot-initramfs-tools
+Source: live-boot
+Version: 2:20151213.vyos1+fbtech1
+Architecture: all
+Maintainer: Live Systems Maintainers <debian-live@lists.debian.org>
+Installed-Size: 20
+Depends: busybox | busybox-initramfs, initramfs-tools, udev
+Conflicts: live-boot-backend
+Replaces: live-boot-backend
+Provides: live-boot-backend
+Homepage: https://debian-live.alioth.debian.org/live-boot/
+Priority: optional
+Section: misc
+Filename: pool/main/l/live-boot/live-boot-initramfs-tools_20151213.vyos1+fbtech1_all.deb
+Size: 4508
+SHA256: 2bf6a7f610344ee1afc38016a2afdda22506724e565f8ab36ce54cbadd87316c
+SHA1: c89668a87c1bd3df97c7405fe8a1596a0e3e8797
+MD5sum: 3f84e5dde650defddb7aed6ce8389480
+Description: Live System Boot Components (initramfs-tools backend)
+ The Live Systems project maintains the components to build Debian based Live
+ systems and the official Debian Live images themselves.
+ .
+ live-boot contains the components to configure a live system during the boot
+ process (early userspace).
+ .
+ This package contains the initramfs-tools backend.
+
+Package: live-build
+Version: 2:20210407+fbtech1
+Architecture: all
+Maintainer: Debian Live <debian-live@lists.debian.org>
+Installed-Size: 1129
+Depends: debootstrap
+Recommends: apt-utils, bzip2, cpio, cryptsetup, file, live-boot-doc, live-config-doc, live-manual-html | live-manual, rsync, systemd-container, wget, xz-utils
+Suggests: e2fsprogs, parted, mtd-utils
+Homepage: https://wiki.debian.org/DebianLive
+Priority: optional
+Section: misc
+Filename: pool/main/l/live-build/live-build_20210407+fbtech1_all.deb
+Size: 329944
+SHA256: 89741810dfa6336e43cd5931b5d84ee2251726f888180a4d2f8225bd2c64a20a
+SHA1: bd51adce488ea46b112457ef22b07e3de7949c08
+MD5sum: ca499239e75081e0c05a53a15898b6f5
+Description: Live System Build Components
+ The Debian Live project maintains the components to build Debian based Live
+ systems and the official Debian Live images themselves.
+ .
+ live-build contains the components to build a live system from a configuration
+ directory.
+
+Package: unionfs-fuse
+Version: 3.6-1
+Architecture: amd64
+Maintainer: fbtech-nos <16152721+ericgullickson@users.noreply.github.com>
+Installed-Size: 152
+Depends: libc6 (>= 2.34), libfuse3-4 (>= 3.17.2)
+Homepage: https://github.com/rpodgorny/unionfs-fuse
+Priority: optional
+Section: utils
+Filename: pool/main/u/unionfs-fuse/unionfs-fuse_3.6-1_amd64.deb
+Size: 47372
+SHA256: dacbcecf0da3c38f713b8050ab2886c2c1dc73e4fdaa2da748f47a28bf9aa315
+SHA1: e5d224534efa3a9d445f0514cfe852a1864c3bdf
+MD5sum: f37aa344ac97aa7fee048765410bc9b2
+Description: Fuse-based union filesystem
+ unionfs-fuse implements union mounts in user space using FUSE. It merges
+ several directories into a single mount point, presenting them as one
+ read-write filesystem. It is used by VyOS-derived configuration systems
+ (vyatta-cfg) to implement copy-on-write configuration sessions.
+ .
+ This package installs the binary as /usr/bin/unionfs-fuse (a symlink to
+ upstream's /usr/bin/unionfs), which is the path vyatta-cfg expects.
+
+Package: vyatta-bash
+Version: 4.1-3+vyos2+current2
+Architecture: amd64
+Maintainer: VyOS Package Maintainers <maintainers@vyos.net>
+Installed-Size: 1270
+Pre-Depends: libc6 (>= 2.38), libtinfo6 (>= 6)
+Depends: base-files (>= 2.1.12), debianutils (>= 2.15), bash (>= 3.1)
+Priority: optional
+Section: shells
+Filename: pool/main/v/vyatta-bash/vyatta-bash_4.1-3+vyos2+current2_amd64.deb
+Size: 645096
+SHA256: 35a52707fafdaf8143089e8b75ded026c5ea8d11575c4806b533d984b90e1048
+SHA1: f29a2c960f7d2171a331338ce6bbfb84caa9a516
+MD5sum: 871e039fad74d38b086b175f4481cef9
+Description: The VyOS Shell based on GNU bash
+ The VyOS Shell based on GNU Bourne Again SHell.
+ .
+ Bash is an sh-compatible command language interpreter that executes
+ commands read from the standard input or from a file.  Bash also
+ incorporates useful features from the Korn and C shells (ksh and csh).
+ .
+ Bash is ultimately intended to be a conformant implementation of the
+ IEEE POSIX Shell and Tools specification (IEEE Working Group 1003.2).
+
+Package: vyatta-biosdevname
+Version: 1:0.3.11+vyos2+current2
+Architecture: amd64
+Maintainer: VyOS Package Maintainers <maintainers@vyos.net>
+Installed-Size: 60
+Depends: libc6 (>= 2.38), libpci3 (>= 1:3.5.1)
+Priority: extra
+Section: contrib/net
+Filename: pool/main/v/vyatta-biosdevname/vyatta-biosdevname_0.3.11+vyos2+current2_amd64.deb
+Size: 19352
+SHA256: 564508862c739dfb0c7d59a58969492d9330cce2640c277b6bb4730c21dfaee7
+SHA1: 5ab1bdd7aa38259c59866b4c55696434d80dade7
+MD5sum: 9af18a0d8c5da3e537f6d569e8b69f54
+Description: VyOS version of the biosdevname utility.
+ Provides biosdevname which takes a kernel device name as an
+ argument, and returns the BIOS-given name it "should" be.  This is
+ necessary on systems where the BIOS name for a given device (e.g. the
+ label on the chassis is "Gb1") doesn't map directly and obviously to
+ the kernel name (e.g. eth0).
+
+Package: vyatta-cfg
+Version: 0.102.0+vyos2+current6
+Architecture: amd64
+Maintainer: VyOS Package Maintainers <maintainers@vyos.net>
+Installed-Size: 228
+Depends: sed (>= 4.1.5), procps (>= 1:3.2.7-3), coreutils (>= 5.97-5.3), vyatta-bash, bash-completion, bsdutils (>= 1:2.13), libvyatta-cfg1 (>= 0.102.0+vyos2+current6), unionfs-fuse, uuid-runtime, libboost-filesystem1.83.0, libapt-pkg4.12 | libapt-pkg5.0 | libapt-pkg6.0 | libapt-pkg7.0, libc6 (>= 2.34), libgcc-s1 (>= 3.0), libglib2.0-0t64 (>= 2.12.0), libstdc++6 (>= 11)
+Suggests: util-linux (>= 2.13-5), net-tools, ncurses-bin (>= 5.5-5)
+Priority: extra
+Section: contrib/net
+Filename: pool/main/v/vyatta-cfg/vyatta-cfg_0.102.0+vyos2+current6_amd64.deb
+Size: 40060
+SHA256: 38bf2e186a77a99c84c5aac77f823ddf4933b0020f1164374e38f0beb1f4a6a8
+SHA1: 712e9bcb3e9507bdfd6387ac2378fa7e3cf2eddd
+MD5sum: 5e638a347cac2dcd9cf205b180d3db8b
+Description: VyOS configuration system
+ This package provides the VyOS configuration system, including the base
+ configuration templates and the config-mode CLI completion mechanism.
+

@@ -1,0 +1,5 @@
+Component: main
+Origin: fbtech-nos
+Label: fbtech-nos
+Architecture: amd64
+Description: fbtech-nos overlay package repository

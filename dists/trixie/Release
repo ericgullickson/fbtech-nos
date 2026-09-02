@@ -1,0 +1,19 @@
+Origin: fbtech-nos
+Label: fbtech-nos
+Codename: trixie
+Date: Wed, 02 Sep 2026 19:13:53 UTC
+Architectures: amd64
+Components: main
+Description: fbtech-nos overlay package repository
+MD5Sum:
+ c078c403282b620a803cb98c22df86c3 11384 main/binary-amd64/Packages
+ 8ad7a92893fcddb29fe134c070b18e1a 4076 main/binary-amd64/Packages.gz
+ 71810ca3e9bafb44dda413e8aeb3bcac 124 main/binary-amd64/Release
+SHA1:
+ b09344e091445fad013235e2c5a0975da18aed61 11384 main/binary-amd64/Packages
+ 61ecd0008e07b25cda9414987a5152f846781380 4076 main/binary-amd64/Packages.gz
+ d049b20bd3a4fa148094370c7b358b000d532481 124 main/binary-amd64/Release
+SHA256:
+ 8f79b2f75f23161ef1cea620551bf1184aed3b4cd4fdad5ba5685000b0c5e6c3 11384 main/binary-amd64/Packages
+ b1b00d813831435b180d12a51d59135bc9393fb26bbbfa2ef3ad75f77bdad869 4076 main/binary-amd64/Packages.gz
+ 1405af71ace166621f100c6cbc7fe1eeefeb0cc4680ce787fde4f1c576ad345a 124 main/binary-amd64/Release
