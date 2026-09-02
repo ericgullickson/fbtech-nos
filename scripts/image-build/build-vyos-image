@@ -55,7 +55,7 @@ def supplier_from_contact_string(raw):
         return {'contact': [{'email': raw.strip()}]}
     return {'name': raw.strip()}
 
-def component_supplier(comp, vyos_supplier, go_authors_supplier):
+def component_supplier(comp, vyos_supplier, go_authors_supplier, debian_supplier):
     # Return the supplier field for CycloneDX components.
 
     # Debian packages: the Maintainer field (component.publisher) is a real,
@@ -64,13 +64,14 @@ def component_supplier(comp, vyos_supplier, go_authors_supplier):
     if supplier:
         return supplier
 
-    # Kernel modules: VyOS compiles every one itself for this exact kernel
-    # build, so VyOS genuinely is the supplier of the binary - regardless of
-    # who originally authored the driver source.
+    # Kernel modules: on fbtech-nos the kernel is Debian's stock
+    # linux-image-amd64, not a VyOS/fbtech-nos self-build, so Debian is the
+    # genuine supplier of the binary here (unlike upstream VyOS, which
+    # compiles every module itself for its own kernel build).
     found_by = next((p['value'] for p in comp.get('properties', [])
                       if p.get('name') == 'syft:package:foundBy'), None)
     if found_by == 'linux-kernel-cataloger':
-        return vyos_supplier
+        return debian_supplier
 
     # Python packages: component.author (from the package's own METADATA) is
     # a real, per-package supplier fact. We install these packages unmodified.
@@ -158,10 +159,30 @@ def build():
     except Exception as e:
         raise ImageBuildError(f'Failed to open the defaults file {defaults.DEFAULTS_FILE}: {e}')
 
-    # Checkout vyos-1x under build directory
+    # Checkout vyos-1x under build directory.
+    #
+    # This is not optional and not just for a version string: utils.py and
+    # raw_image.py (imported a few lines below) both `import vyos` straight
+    # out of this checkout for real functionality used throughout the rest
+    # of this script - vyos.utils.process.call/rc_cmd is what cmd()/rc_cmd()
+    # call to run every shell command in this file, including `lb config`
+    # and `lb build` themselves; vyos.defaults supplies path/activation-hint
+    # constants; vyos.template is used by raw_image.py. The whole build
+    # depends on a working checkout here.
+    #
+    # component_git_branch/component_git_org/component_repos are separate
+    # from vyos_branch/release_train (release-train labels) and from
+    # vyos_mirror_suite (the apt suite of the VyOS/overlay package mirror) -
+    # this is the git branch and repo of the vyos-1x *source* fork, which
+    # has no reason to share a name with either of those. See
+    # docs/TRIXIE-BASE.md for the breakage this conflation caused.
     try:
-        branch_name = build_defaults['vyos_branch']
-        url_vyos_1x = os.getenv('VYOS1X_REPO_URL', default='https://github.com/vyos/vyos-1x')
+        component_repos = build_defaults.get('component_repos', {})
+        component_repo_name = component_repos.get('vyos-1x', 'vyos-1x')
+        default_url = 'https://github.com/{0}/{1}'.format(
+            build_defaults['component_git_org'], component_repo_name)
+        branch_name = os.getenv('VYOS1X_REPO_BRANCH', default=build_defaults['component_git_branch'])
+        url_vyos_1x = os.getenv('VYOS1X_REPO_URL', default=default_url)
         path_vyos_1x = os.path.join(defaults.BUILD_DIR, 'vyos-1x')
         try:
             repo_vyos_1x = git.Repo.clone_from(url_vyos_1x, path_vyos_1x, no_checkout=True)
@@ -419,10 +440,10 @@ def build():
     shutil.copytree("data/live-build-config/", lb_config_dir)
     os.makedirs(lb_config_dir, exist_ok=True)
 
-    ## Secure Boot - Copy public Keys to image
-    sb_certs = 'data/certificates'
-    if os.path.isdir(sb_certs):
-        shutil.copytree(sb_certs, f'{lb_config_dir}/includes.chroot/var/lib/shim-signed/mok')
+    # Note: VyOS's Secure Boot shim/MOK enrollment (data/certificates,
+    # var/lib/shim-signed/mok) is dropped on fbtech-nos. Debian's own
+    # signed shim, grub and kernel are used as-is; see the removed
+    # 93-sb-sign-kernel.chroot hook and docs/TRIXIE-BASE.md.
 
     # Switch to the build directory, this is crucial for the live-build work
     # because the effective build config files etc. are there.
@@ -597,8 +618,8 @@ menu clear
 
         # Add the additional repositories to package lists
         print("I: Setting up VyOS repository APT entries")
-        vyos_repo_entry = "deb {vyos_mirror} {vyos_branch} main\n".format(**build_config)
-        vyos_repo_entry += "deb-src {vyos_mirror} {vyos_branch} main\n".format(**build_config)
+        vyos_repo_entry = "deb {vyos_mirror} {vyos_mirror_suite} main\n".format(**build_config)
+        vyos_repo_entry += "deb-src {vyos_mirror} {vyos_mirror_suite} main\n".format(**build_config)
 
         apt_file = defaults.VYOS_REPO_FILE
 
@@ -733,7 +754,7 @@ menu clear
                 --checksums "sha256" \
                 --chroot-squashfs-compression-type "{{squashfs_compression_type}}" \
                 --debian-installer none \
-                --debootstrap-options "--variant=minbase --exclude=isc-dhcp-client,isc-dhcp-common,ifupdown --include=apt-utils,ca-certificates,gnupg2,linux-kbuild-6.1" \
+                --debootstrap-options "--variant=minbase --exclude=isc-dhcp-client,isc-dhcp-common,ifupdown --include=apt-utils,ca-certificates,gnupg2" \
                 --distribution "{{debian_distribution}}" \
                 --firmware-binary false \
                 --firmware-chroot false \
@@ -741,7 +762,7 @@ menu clear
                 --iso-publisher "{{build_by}}" \
                 --iso-volume "VyOS" \
                 --linux-flavours "{{kernel_flavor}}" \
-                --linux-packages "linux-image-{{kernel_version}}" \
+                --linux-packages "linux-image" \
                 --mirror-binary "{{debian_mirror}}" \
                 --mirror-binary-security "{{debian_security_mirror}}" \
                 --mirror-bootstrap "{{debian_mirror}}" \
@@ -755,9 +776,16 @@ menu clear
 
         lb_config_command = lb_config_tmpl.render(build_config)
 
-        ## Pin release for VyOS packages
+        ## Pin release for VyOS/overlay packages.
+        ##
+        ## Pinned by Origin (o=), not suite/codename (n=): vyos_mirror_suite
+        ## ("trixie") is the same string Debian's own main archive reports
+        ## as its Codename, so an n= pin here would also match every
+        ## ordinary Debian trixie package, not just ours. vyos_mirror_origin
+        ## is the Origin: field the package-build pipeline's reprepro config
+        ## sets, which is unique to our repo. See docs/TRIXIE-BASE.md.
         apt_pin = f"""Package: *
-Pin: release n={build_config['release_train']}
+Pin: release o={build_config['vyos_mirror_origin']}
 Pin-Priority: 600
 """
 
@@ -862,6 +890,7 @@ Pin-Priority: 600
             vyos_author = {'name': 'VyOS maintainers and contributors', 'email': 'maintainers@vyos.io'}
             vyos_supplier = {'name': 'VyOS Networks', 'url': [build_defaults['website_url']]}
             go_authors_supplier = {'name': 'The Go Authors', 'url': ['https://go.dev']}
+            debian_supplier = {'name': 'Debian', 'url': ['https://www.debian.org']}
 
             cdx['metadata']['authors'] = [vyos_author]
             cdx['metadata']['supplier'] = vyos_supplier
@@ -874,7 +903,7 @@ Pin-Priority: 600
 
             # Add the correct component.supplier field.
             for comp in cdx['components']:
-                supplier = component_supplier(comp, vyos_supplier, go_authors_supplier)
+                supplier = component_supplier(comp, vyos_supplier, go_authors_supplier, debian_supplier)
                 if supplier:
                     comp['supplier'] = supplier
 

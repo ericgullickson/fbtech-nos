@@ -1,0 +1,10 @@
+# trixie-backports gives us the newer kernel (7.1, matching VyOS's closer
+# behaviour and picking up in-kernel OpenVPN DCO/ovpn) and a newer Kea
+# (3.0.3 vs. trixie's 2.6.3) without pulling the rest of backports in.
+#
+# `lb config --backports true` (see build-vyos-image) already adds an
+# equivalent entry derived from --mirror-chroot at build time; this static
+# file is kept in addition so the trixie-backports.pref.chroot pin below
+# has a source it clearly corresponds to even if that flag's behaviour
+# changes. A duplicate apt source for the same repository is harmless.
+deb http://deb.debian.org/debian trixie-backports main contrib non-free non-free-firmware

@@ -1,16 +1,14 @@
 # Packages added to images for x86 by default
+#
+# vyos-linux-firmware, vyos-intel-*, vyos-drivers-realtek-r8152 and
+# vyos-ipt-netflow were VyOS's own rebuilds/out-of-tree drivers for its
+# self-built kernel. On Debian's stock kernel the in-tree r8169/r8152 and
+# igb/ixgbe/i40e/ice/iavf drivers are used as-is, and firmware-linux from
+# non-free-firmware supplies the firmware blobs. See docs/TRIXIE-BASE.md.
 packages = [
   "grub2",
   "grub-pc",
-  "vyos-drivers-realtek-r8152",
-  "vyos-linux-firmware",
-  "vyos-intel-qat",
-  "vyos-intel-ixgbe",
-  "vyos-intel-ixgbevf",
-  "vyos-intel-i40e",
-  "vyos-intel-ice",
-  "vyos-intel-iavf",
-  "vyos-ipt-netflow",
+  "firmware-linux",
   "intel-microcode",
   "amd64-microcode"
 ]

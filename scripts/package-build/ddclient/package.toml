@@ -1,4 +1,0 @@
-[[packages]]
-name = "ddclient"
-commit_id = "ae21b1deee"
-scm_url = "https://salsa.debian.org/debian/ddclient"

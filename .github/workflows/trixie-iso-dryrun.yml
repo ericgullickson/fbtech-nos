@@ -1,0 +1,70 @@
+name: Trixie ISO dry-run
+
+# Manual only. Uses our own apt repo (data/defaults.toml's vyos_mirror /
+# vyos_mirror_suite, currently https://ericgullickson.github.io/fbtech-nos
+# suite trixie) rather than an explicit --vyos-mirror override, so this
+# also exercises the repo's signed Release/InRelease fetch and the
+# fbtech-nos.key.chroot/fbtech-nos.pref.chroot Origin pin. This is
+# expected to fail: vyos-1x (and the rest of the overlay) is not published
+# there yet (see docs/FORK-PLAN.md milestone 2), so live-build should get
+# through apt's signature check on our repo and then fail to find an
+# installation candidate for vyos-1x. The point of running it is to see
+# how far the Debian side of the build gets before that happens, and to
+# capture the exact failure and any unsatisfiable dependencies for
+# docs/TRIXIE-BASE.md.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  dryrun:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    continue-on-error: true
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/fbtech-nos-build:trixie
+      options: --sysctl net.ipv6.conf.lo.disable_ipv6=0 --privileged
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Attempt a trixie ISO build (expected to fail)
+        shell: bash
+        run: |
+          set +e
+          sudo --preserve-env ./build-vyos-image \
+            --architecture amd64 \
+            --build-by ci@fbtech-nos \
+            --build-type release \
+            --version dryrun \
+            generic 2>&1 | tee /tmp/dryrun.log
+          echo "build_exit_code=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Summarize failure point
+        if: always()
+        shell: bash
+        run: |
+          echo "### Trixie ISO dry-run result" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Exit code: ${build_exit_code:-unknown}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Last 200 lines of output:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 200 /tmp/dryrun.log >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Lines mentioning unmet dependencies / unable to install:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -iE "unable to locate|unmet dependencies|E: Package|is not installable|no installation candidate|Broken packages|Depends:" /tmp/dryrun.log >> "$GITHUB_STEP_SUMMARY" || echo "(none found)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload dry-run log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: trixie-dryrun-log
+          path: /tmp/dryrun.log
+          retention-days: 14
